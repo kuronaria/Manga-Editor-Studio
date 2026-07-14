@@ -477,7 +477,7 @@
     "order": 490.5,
     "label": "Avoid Overwriting \n(Create New Folder for each Run)",
     "default": true,
-    "tooltip": "RECOMMENDED.\nIf checked, the app will create a new numbered folder (e.g., 'Manga-ENG (1)') if an output folder with the same name already exists.\nThis prevents accidentally skipping a job or overwriting previous results.\n\nUncheck this only if you specifically want to re-run a job and overwrite its previous output."
+    "tooltip": "RECOMMENDED.\nIf checked, the app will create a new numbered folder (e.g., 'Manga-ENG (1)') if an output folder with the same name already exists.\nThis prevents accidentally overwriting previous results.\n\nNOTE: Uncheck this to enable RESUME: the app will reuse the existing output folder and only process images that are not in it yet.\n('Overwrite existing output folder' takes priority over this option.)"
   },
   "backup_original": {
     "widget": "checkbox",
@@ -491,10 +491,10 @@
     "widget": "entry",
     "group": "Render & Output",
     "order": 492,
-    "label": "Filter Text (comma-sep):",
+    "label": "Filter Text (regex):",
     "default": null,
-    "placeholder": "e.g., (SFX),[NOISE]",
-    "tooltip": "Enter patterns (comma-separated) for text you want the OCR to ignore.\nThis is useful for filtering out unwanted elements like sound effects (SFX),\n watermarks or consistent background text that you don't want translated.\n\nExample: SFX, (NOISE), TO BE CONTINUED\n\nAny text matching these patterns will be completely ignored during the translation process."
+    "placeholder": "e.g., .*SFX.*|.*NOISE.*",
+    "tooltip": "Enter a REGULAR EXPRESSION for text you want to ignore.\nThis is useful for filtering out unwanted elements like sound effects (SFX),\nwatermarks or consistent background text that you don't want translated.\n\nExample: .*SFX.*|.*TO BE CONTINUED.*\n(use | to separate multiple patterns)\n\nAny text matching this pattern will be completely ignored during the translation process."
   },
   "font_size": {
     "widget": "slider",

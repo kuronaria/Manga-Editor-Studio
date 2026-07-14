@@ -92,6 +92,13 @@ class TranslatorStudioApp(QMainWindow):
 
     log_signal = Signal(str, str)
     pipeline_finished_signal = Signal()
+    # FIX (thread-safety): the worker thread must never touch Qt widgets
+    # directly. These signals marshal all UI updates onto the main thread.
+    refresh_lists_signal = Signal()
+    toggle_ui_signal = Signal(bool, object)  # (is_running, running_job_id or None)
+    job_failed_signal = Signal(str)          # job name
+    visual_test_result_signal = Signal(str)  # path of the result image
+    visual_test_finished_signal = Signal()
 
     def __init__(self):
         super().__init__()
@@ -134,10 +141,28 @@ class TranslatorStudioApp(QMainWindow):
         temp_dir = os.path.join(self.project_base_dir, "MangaStudio_Data", "temp")
         self.pipeline = Pipeline(self, self.config_loader.python_executable, temp_dir)
 
+        self.currently_processing_job_id = None
+
         self._initialize_app()
         # Connect custom signals to their slots
         self.log_signal.connect(self._insert_log_text)
         self.pipeline_finished_signal.connect(self._on_pipeline_finished)
+        self.refresh_lists_signal.connect(self._refresh_both_lists)
+        self.toggle_ui_signal.connect(self._toggle_ui_state)
+        self.job_failed_signal.connect(self._show_job_failed_message)
+        self.visual_test_result_signal.connect(self._display_test_result)
+        self.visual_test_finished_signal.connect(self._on_visual_test_finished)
+
+    def _refresh_both_lists(self):
+        """Slot (main thread): refreshes the queue and history list widgets."""
+        self._update_job_list_ui()
+        self._update_history_list_ui()
+
+    def _show_job_failed_message(self, job_name: str):
+        """Slot (main thread): shows the job-failed dialog."""
+        QMessageBox.critical(self, "Job Failed",
+                             f"The job '{job_name}' failed due to a critical error.\n\n"
+                             "Check the Live Log for details.")
 
     def _initialize_app(self):
         """
@@ -272,12 +297,10 @@ class TranslatorStudioApp(QMainWindow):
         tab_compare = self._create_visual_compare_tab()
         tab_log = self._create_log_tab()
 
-        # Add a simple label to the other tabs for now
-        compare_layout = QVBoxLayout(tab_compare)
-        compare_layout.addWidget(QLabel("Visual comparison tools will be built here."))
-
-        log_layout = QVBoxLayout(tab_log)
-        log_layout.addWidget(QLabel("The live log will be displayed here."))
+        # FIX: removed the second QVBoxLayout previously set on tab_compare and
+        # tab_log here. Both widgets already receive their layout inside
+        # _create_visual_compare_tab() / _create_log_tab(); setting a second
+        # layout triggers a Qt warning and the labels never appeared anyway.
 
         self.main_tabs.addTab(tab_config, "Configuration ⚙️")
         # --- DISABLED FEATURE: The Visual Compare tab is hidden until its core bug is fixed. ---
@@ -375,8 +398,11 @@ class TranslatorStudioApp(QMainWindow):
         self.translated_view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
 
         # --- Connect events for zooming and synchronized panning ---
-        self.original_view.wheelEvent = self._wheel_event_zoom
-        self.translated_view.wheelEvent = self._wheel_event_zoom
+        # FIX: pass the receiving view to the handler so a plain scroll is only
+        # forwarded to the view that actually received the event (the scrollbar
+        # sync connections below already mirror it to the other view).
+        self.original_view.wheelEvent = lambda e, v=self.original_view: self._wheel_event_zoom(e, v)
+        self.translated_view.wheelEvent = lambda e, v=self.translated_view: self._wheel_event_zoom(e, v)
         self.original_view.horizontalScrollBar().valueChanged.connect(self.translated_view.horizontalScrollBar().setValue)
         self.original_view.verticalScrollBar().valueChanged.connect(self.translated_view.verticalScrollBar().setValue)
         self.translated_view.horizontalScrollBar().valueChanged.connect(self.original_view.horizontalScrollBar().setValue)
@@ -872,20 +898,9 @@ class TranslatorStudioApp(QMainWindow):
 
         return container
 
-    def _create_font_combobox(self, info: dict) -> QComboBox:
-        """Creates a combobox populated with system and project fonts."""
-        combo_box = QComboBox()
-        font_list = self._get_font_list()
-        combo_box.addItems(font_list)
-
-        # Make the header items non-selectable for better UX
-        for i, item_text in enumerate(font_list):
-            if item_text.startswith("---"):
-                combo_box.model().item(i).setEnabled(False)
-
-        default_font = info.get("default", "Sans-serif")
-        combo_box.setCurrentText(default_font)
-        return combo_box
+    # FIX: removed a duplicate, older definition of _create_font_combobox that
+    # used system fonts. The active definition (based on self.font_map) lives
+    # near the end of this class.
 
     def _create_entry_with_button(self, info: dict) -> QWidget:
         """Creates a QLineEdit with a QPushButton next to it."""
@@ -1137,21 +1152,8 @@ class TranslatorStudioApp(QMainWindow):
         self._refresh_profile_list()  # Initial population of the combobox
         return preset_frame
 
-    def _get_font_list(self) -> list:
-        """Gets a combined list of project and system fonts."""
-        project_fonts = []
-        fonts_dir = os.path.join(self.project_base_dir, "fonts")
-        if os.path.isdir(fonts_dir):
-            project_fonts = sorted([f for f in os.listdir(fonts_dir) if f.lower().endswith(('.ttf', '.otf'))])
-
-        # Use QFontDatabase for a reliable way to get system fonts
-        system_fonts = sorted(QFontDatabase().families())
-
-        final_list = []
-        if project_fonts:
-            final_list.extend(project_fonts)
-        final_list.extend(system_fonts)
-        return final_list
+    # FIX: removed dead helper _get_font_list (only used by the removed
+    # duplicate _create_font_combobox).
 
     def _update_chain_ui_state(self):
         """
@@ -1602,10 +1604,12 @@ class TranslatorStudioApp(QMainWindow):
                         return int(value.replace("x", ""))
                 return value
             return None  # Return None if no button is checked
-        elif key == "language_checkbox_grid":
+        elif widget_type == "language_checkbox_grid":
+            # FIX: was `key == "language_checkbox_grid"`, which never matched
+            # (the actual key is e.g. 'skip_lang'), so the value was always None.
             checkbox_dict = self.widget_references.get(key, {})
             selected = [code for code, cb in checkbox_dict.items() if cb.isChecked()]
-            return ",".join(sorted(selected))
+            return ",".join(sorted(selected)) if selected else None
         elif widget_type == "slider":
             slider = widget.findChild(QSlider)
             if slider:
@@ -1672,7 +1676,8 @@ class TranslatorStudioApp(QMainWindow):
                     if button.text() == value_to_check:
                         button.setChecked(True)
                         break
-        elif key == "language_checkbox_grid":
+        elif widget_type == "language_checkbox_grid":
+            # FIX: was `key == "language_checkbox_grid"` (never matched).
             checkbox_dict = self.widget_references.get(key, {})
             selected_langs = set(str(value).split(','))
             for code, cb in checkbox_dict.items():
@@ -1763,13 +1768,8 @@ class TranslatorStudioApp(QMainWindow):
         else:
             event.ignore()
 
-    def _remove_selected_jobs_from_queue(self):
-        """Placeholder for removing selected jobs. To be implemented with context menu."""
-        print("Action: Remove Selected Jobs (Not yet implemented)")
-        # Future logic will go here
-        # selected_items = self.queue_list_widget.selectedItems()
-        # ... loop and remove from self.job_queue ...
-        # self._update_job_list_ui()
+    # FIX: removed duplicate placeholder _remove_selected_jobs_from_queue.
+    # The real implementation lives further down in this class.
 
     def _duplicate_selected_jobs(self):
         """
@@ -2037,11 +2037,12 @@ class TranslatorStudioApp(QMainWindow):
         self.translated_view.fitInView(self.original_pixmap_item, Qt.AspectRatioMode.KeepAspectRatio)  # Use original's rect for sync
         self._update_zoom_label()
 
-    def _wheel_event_zoom(self, event):
+    def _wheel_event_zoom(self, event, view=None):
         """Handles zooming with Ctrl+MouseWheel, respecting the zoom limit checkbox."""
         if not self.original_pixmap_item or event.modifiers() != Qt.KeyboardModifier.ControlModifier:
-            QGraphicsView.wheelEvent(self.original_view, event)
-            QGraphicsView.wheelEvent(self.translated_view, event)
+            # FIX: forward only to the view that received the event; the
+            # scrollbar sync keeps the other view aligned.
+            QGraphicsView.wheelEvent(view or self.original_view, event)
             return
 
         # Define zoom factors and limits
@@ -2139,26 +2140,36 @@ class TranslatorStudioApp(QMainWindow):
             is_verbose
         )
 
-        if success:
-            self.log("SUCCESS", "Visual test backend process completed.")
-            result_files = os.listdir(final_output_dir)
-            if result_files:
-                # Find the resulting image (it should have the same name as the original)
-                original_filename = os.path.basename(self.test_image_path)
-                result_path = os.path.join(final_output_dir, original_filename)
-                if os.path.exists(result_path):
-                    # Use QTimer to ensure UI updates happen on the main thread
-                    QTimer.singleShot(0, lambda: self._display_test_result(result_path))
+        try:
+            # FIX: guard against the output folder not existing (previously an
+            # unhandled FileNotFoundError left the button stuck on "Testing...").
+            if success and os.path.isdir(final_output_dir):
+                self.log("SUCCESS", "Visual test backend process completed.")
+                result_files = os.listdir(final_output_dir)
+                if result_files:
+                    # Find the resulting image. The backend may change the
+                    # extension (e.g. jpg -> png), so match by base name.
+                    source_stem = os.path.splitext(os.path.basename(self.test_image_path))[0]
+                    result_name = next(
+                        (f for f in sorted(result_files)
+                         if os.path.splitext(f)[0] == source_stem), None)
+                    if result_name:
+                        result_path = os.path.join(final_output_dir, result_name)
+                        # FIX (thread-safety): signal instead of QTimer from worker thread
+                        self.visual_test_result_signal.emit(result_path)
+                    else:
+                        self.log("ERROR", "Could not find the translated image in the output folder.")
                 else:
-                    self.log("ERROR", "Could not find the translated image in the output folder.")
-        else:
-            self.log("ERROR", "Visual test failed or was stopped.")
-            # Clean up the potentially empty output folder on failure
-            if os.path.exists(final_output_dir) and not os.listdir(final_output_dir):
-                shutil.rmtree(final_output_dir)
-
-        # Use QTimer to ensure the button is re-enabled on the main thread
-        QTimer.singleShot(0, self._on_visual_test_finished)
+                    self.log("ERROR", "The output folder is empty.")
+            else:
+                self.log("ERROR", "Visual test failed or was stopped.")
+                # Clean up the potentially empty output folder on failure
+                if os.path.exists(final_output_dir) and not os.listdir(final_output_dir):
+                    shutil.rmtree(final_output_dir)
+        finally:
+            # FIX (thread-safety): signal instead of QTimer from worker thread,
+            # and guaranteed to run so the button is always re-enabled.
+            self.visual_test_finished_signal.emit()
 
     def _display_test_result(self, image_path: str):
         """Loads the result image and displays it in the 'Output' view."""
@@ -2282,14 +2293,42 @@ class TranslatorStudioApp(QMainWindow):
         final_config = {}
         all_props = self.config_loader.full_config_data
 
+        # FIX: keys that live at the ROOT of the backend Config object.
+        # They were previously routed into the 'render' dict based on their UI
+        # group and silently ignored by the backend (pydantic drops unknown keys).
+        ROOT_CONFIG_KEYS = {'filter_text', 'kernel_size', 'mask_dilation_offset', 'force_simple_sort'}
+
+        # FIX: GUI-only keys that should never be written into the backend
+        # config JSON (they are read separately from job['settings']).
+        GUI_ONLY_KEYS = {
+            'processing_device', 'processing_mode', 'batch_size',
+            'output_format', 'avoid_conflicts', 'overwrite_output',
+            'backup_original', 'auto_rename', 'enable_translator_chain',
+            'enable_verbose_output', 'restore_size_after_colorize',
+            'task_upscale_grid', 'preset_manager', 'api_key_manager',
+        }
+
         for key, prop_info in all_props.items():
             if key not in settings: continue
-            
+
             value = settings.get(key)
             if value == "" or value is None: continue
 
             # Skip font_family, it's handled manually below
             if key == 'font_family':
+                continue
+
+            if key in GUI_ONLY_KEYS:
+                continue
+
+            if key in ROOT_CONFIG_KEYS:
+                # kernel_size must be an int (comes from a QLineEdit as str)
+                if key == 'kernel_size':
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        continue
+                final_config[key] = value
                 continue
 
             group = prop_info.get("group", "")
@@ -2354,8 +2393,10 @@ class TranslatorStudioApp(QMainWindow):
                 job = job_to_process
                 self.currently_processing_job_id = job['id']
                 job['status'] = 'Processing'
-                self._update_job_list_ui()
-                self._toggle_ui_state(True, job['id'])
+                # FIX (thread-safety): update the UI via signals, never directly
+                # from this worker thread.
+                self.refresh_lists_signal.emit()
+                self.toggle_ui_signal.emit(True, job['id'])
 
                 settings = job.get('settings', {})
                 selected_mode = settings.get('processing_mode', 'Automatic')
@@ -2365,24 +2406,47 @@ class TranslatorStudioApp(QMainWindow):
                 if selected_mode == 'Low VRAM' or (selected_mode == 'Automatic' and self.detected_vram_gb > 0 and self.detected_vram_gb <= 6):
                     mode_to_use = 'Low VRAM'
 
-                # --- NEW FOLDER NAMING LOGIC ---
+                # --- FOLDER NAMING LOGIC ---
                 source_path = job['source_path']
                 job_type_tag = f"TASK-{job.get('job_type')}" if job.get('job_type') != 'T' else settings.get('target_lang', 'ENG')
                 base_output_folder_name = f"{os.path.basename(source_path)}-{job_type_tag}"
                 output_dir = os.path.dirname(source_path)
-                
-                final_output_folder_name = base_output_folder_name
 
-                # Check the user's preference for avoiding conflicts
-                if settings.get('avoid_conflicts', True):
+                final_output_folder_name = base_output_folder_name
+                base_output_path = os.path.join(output_dir, base_output_folder_name)
+
+                # FIX: implement 'overwrite_output' (was a dead checkbox) and give
+                # the three options a clear precedence:
+                #   1. overwrite_output  -> delete the existing folder, start fresh
+                #   2. avoid_conflicts   -> create a new numbered folder
+                #   3. neither           -> reuse the existing folder (enables RESUME)
+                if settings.get('overwrite_output', False):
+                    if os.path.exists(base_output_path):
+                        try:
+                            shutil.rmtree(base_output_path)
+                            self.log("INFO", f"Overwrite enabled: removed existing output folder '{base_output_folder_name}'.")
+                        except Exception as e:
+                            self.log("WARNING", f"Could not remove existing output folder: {e}")
+                elif settings.get('avoid_conflicts', True):
                     counter = 1
                     # Append (1), (2), etc., until a unique name is found
                     while os.path.exists(os.path.join(output_dir, final_output_folder_name)):
                         final_output_folder_name = f"{base_output_folder_name} ({counter})"
                         counter += 1
-                
+
                 final_output_path = os.path.join(output_dir, final_output_folder_name)
                 # --- END OF FOLDER NAMING LOGIC ---
+
+                # FIX: implement 'backup_original' (was a dead checkbox).
+                if settings.get('backup_original', False):
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    backup_path = os.path.join(output_dir, f"{os.path.basename(source_path)}_backup_{timestamp}")
+                    try:
+                        if not os.path.exists(backup_path):
+                            shutil.copytree(source_path, backup_path)
+                            self.log("INFO", f"Backup of original folder created: '{os.path.basename(backup_path)}'.")
+                    except Exception as e:
+                        self.log("WARNING", f"Could not create backup of the original folder: {e}")
 
                 os.makedirs(final_output_path, exist_ok=True)
                 all_source_files = sorted([f for f in os.listdir(source_path) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.bmp'))])
@@ -2398,10 +2462,9 @@ class TranslatorStudioApp(QMainWindow):
                     job['status'] = "Completed"
                     self.job_queue.remove(job)
                     self.history_queue.append(job)
-                    self._update_job_list_ui()
-                    self._update_history_list_ui()
-                    # A small delay to let the UI update before the pipeline finishes
-                    QApplication.processEvents() 
+                    # FIX (thread-safety): UI refresh via signal; removed the
+                    # QApplication.processEvents() call from the worker thread.
+                    self.refresh_lists_signal.emit()
                     continue # Move to the next job in the queue
                 
                 # (The rest of the function remains exactly the same as before)
@@ -2464,13 +2527,14 @@ class TranslatorStudioApp(QMainWindow):
                 job['status'] = "Completed" if success else ("Stopped" if self._stopped_by_user else "Failed")
 
                 if not success and not self._stopped_by_user:
-                    QTimer.singleShot(0, lambda j=job: QMessageBox.critical(self, "Job Failed", f"The job '{j['name']}' failed due to a critical error.\n\nCheck the Live Log for details."))
+                    # FIX (thread-safety): show the dialog via a signal instead of
+                    # QTimer.singleShot from a non-GUI thread.
+                    self.job_failed_signal.emit(job['name'])
 
                 self.job_queue.remove(job)
                 self.history_queue.append(job)
                 self.currently_processing_job_id = None
-                self._update_job_list_ui()
-                self._update_history_list_ui()
+                self.refresh_lists_signal.emit()
 
                 if self._stopped_by_user:
                     self.log("PIPELINE", "Pipeline stopped by user command.")
@@ -2995,6 +3059,10 @@ class TranslatorStudioApp(QMainWindow):
             job = next((j for j in self.job_queue if j['id'] == job_id), None)
             if job:
                 job['settings'] = copy.deepcopy(self.current_settings)
+                # FIX: these two values were read from the panel but never
+                # actually stored into the job (found via static analysis).
+                job['settings']['processing_mode'] = processing_mode_value
+                job['settings']['batch_size'] = batch_size_value
                 job['status'] = 'Ready'
                 # If the job has no type, default it to 'Translate'
                 if not job.get('job_type'):
@@ -3061,10 +3129,12 @@ class TranslatorStudioApp(QMainWindow):
             "OPENAI_GLOSSARY_PATH=./dict/mit_glossary.txt",
             "\n# --- Groq ---",
             "GROQ_API_KEY=",
-            "GROQ_MODEL=mixtral-8x7b-32768",
+            "# Note: check https://console.groq.com/docs/models for currently available models",
+            "GROQ_MODEL=llama-3.3-70b-versatile",
             "\n# --- Gemini ---",
             "GEMINI_API_KEY=",
-            "GEMINI_MODEL=gemini-1.5-flash",
+            "# Note: check https://ai.google.dev/gemini-api/docs/models for currently available models",
+            "GEMINI_MODEL=gemini-2.0-flash",
             "\n# --- DeepSeek ---",
             "DEEPSEEK_API_KEY=",
             "DEEPSEEK_MODEL=deepseek-chat",

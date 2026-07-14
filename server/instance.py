@@ -1,3 +1,4 @@
+import os
 from asyncio import Event, Lock
 from typing import List
 
@@ -6,6 +7,20 @@ from pydantic import BaseModel
 
 from manga_translator import Config
 from server.sent_data_internal import fetch_data_stream, NotifyType, fetch_data
+
+
+def _nonce_headers():
+    """
+    FIX: the internal translator instance is started with --nonce and rejects
+    any request whose X-Nonce header does not match (share.py check_nonce),
+    but these requests were previously sent WITHOUT the header, so every
+    /execute/translate call failed with 401 Unauthorized. The web server
+    stores the nonce in the MT_WEB_NONCE environment variable (see
+    server/main.py prepare()).
+    """
+    nonce = os.getenv('MT_WEB_NONCE', '')
+    return {"X-Nonce": nonce} if nonce else {}
+
 
 class ExecutorInstance(BaseModel):
     ip: str
@@ -16,20 +31,20 @@ class ExecutorInstance(BaseModel):
         self.busy = False
 
     async def sent(self, image: Image, config: Config):
-        return await fetch_data("http://"+self.ip+":"+str(self.port)+"/simple_execute/translate", image, config)
+        return await fetch_data("http://"+self.ip+":"+str(self.port)+"/simple_execute/translate", image, config, headers=_nonce_headers())
 
     async def sent_stream(self, image: Image, config: Config, sender: NotifyType):
-        await fetch_data_stream("http://"+self.ip+":"+str(self.port)+"/execute/translate", image, config, sender)
+        await fetch_data_stream("http://"+self.ip+":"+str(self.port)+"/execute/translate", image, config, sender, headers=_nonce_headers())
 
     async def sent_batch(self, images: List[Image.Image], config: Config, batch_size: int):
         """发送批量翻译请求"""
-        return await fetch_data("http://"+self.ip+":"+str(self.port)+"/simple_execute/translate_batch", 
-                               {"images": images, "config": config, "batch_size": batch_size})
+        return await fetch_data("http://"+self.ip+":"+str(self.port)+"/simple_execute/translate_batch",
+                               {"images": images, "config": config, "batch_size": batch_size}, headers=_nonce_headers())
 
     async def sent_batch_stream(self, images: List[Image.Image], config: Config, batch_size: int, sender: NotifyType):
         """发送批量翻译流式请求"""
         await fetch_data_stream("http://"+self.ip+":"+str(self.port)+"/execute/translate_batch",
-                               {"images": images, "config": config, "batch_size": batch_size}, config, sender)
+                               {"images": images, "config": config, "batch_size": batch_size}, config, sender, headers=_nonce_headers())
 
 class Executors:
     def __init__(self):

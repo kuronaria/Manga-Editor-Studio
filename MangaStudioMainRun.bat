@@ -8,6 +8,31 @@ REM =================================================================
 REM Set the working directory to this script's location.
 cd /d "%~dp0"
 
+REM --- FIX: detect the Python interpreter to use. ---
+REM Prefer the local venv; fall back to the system Python if venv is missing.
+set "PY_EXE=.\venv\Scripts\python.exe"
+set "PYW_EXE=.\venv\Scripts\pythonw.exe"
+
+if exist "%PY_EXE%" goto MENU
+
+echo [WARNING] Local 'venv' folder not found.
+echo [WARNING] Falling back to the system Python. Make sure PySide6 and all
+echo [WARNING] manga-image-translator requirements are installed there, e.g.:
+echo.
+echo     python -m venv venv
+echo     venv\Scripts\pip install -r requirements.txt
+echo     venv\Scripts\pip install PySide6
+echo.
+set "PY_EXE=python"
+set "PYW_EXE=pythonw"
+
+where python >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] No Python found on PATH either. Please install Python first.
+    pause
+    exit /b 1
+)
+
 :MENU
 cls
 echo.
@@ -34,17 +59,17 @@ IF ERRORLEVEL 1 GOTO NORMAL_MODE
 
 :NORMAL_MODE
 echo [INFO] Launching in Normal (Silent) Mode...
-start "" ".\venv\Scripts\pythonw.exe" MangaStudioMain.py
+start "" "%PYW_EXE%" MangaStudioMain.py
 GOTO END
 
 :DEBUG_MODE
 echo [INFO] Launching in Debug (Console) Mode...
 echo -----------------------------------------------------------------
-.\venv\Scripts\python.exe MangaStudioMain.py
+"%PY_EXE%" MangaStudioMain.py
 echo -----------------------------------------------------------------
 echo [DEBUG] Script has finished or was stopped.
 pause
 GOTO END
 
 :END
-exit
+exit /b

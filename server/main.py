@@ -284,6 +284,10 @@ def prepare(args):
         nonce = os.getenv('MT_WEB_NONCE', generate_nonce())
     else:
         nonce = args.nonce
+    # FIX: expose the nonce so server/instance.py can attach it as the
+    # X-Nonce header on requests to the internal translator instance.
+    # Without this every /execute/translate call was rejected with 401.
+    os.environ['MT_WEB_NONCE'] = nonce
     if args.start_instance:
         return start_translator_client_proc(args.host, args.port + 1, nonce, args)
     folder_name= "upload-cache"

@@ -51,10 +51,7 @@
                 v-model="detectionResolution"
                 @change="onSettingChange"
               >
-                <option value="1024">1024px</option>
-                <option value="1536">1536px</option>
-                <option value="2048">2048px</option>
-                <option value="2560">2560px</option>
+                <option value="original">Original</option>
               </select>
               <i
                 class="iconify absolute top-1 right-1 text-gray-500 pointer-events-none"
@@ -141,32 +138,9 @@
                   v-model="targetLanguage"  
                   @change="onSettingChange"
               >  
-                  <option value="CHS">简体中文</option>  
-                  <option value="CHT">繁體中文</option>  
-                  <option value="CSY">čeština</option>  
-                  <option value="NLD">Nederlands</option>  
-                  <option value="ENG">English</option>  
-                  <option value="FRA">français</option>  
-                  <option value="DEU">Deutsch</option>  
-                  <option value="HUN">magyar nyelv</option>  
-                  <option value="ITA">italiano</option>  
-                  <option value="JPN">日本語</option>  
-                  <option value="KOR">한국어</option>  
-                  <option value="POL">polski</option>  
-                  <option value="PTB">português</option>  
-                  <option value="ROM">limba română</option>  
-                  <option value="RUS">русский язык</option>  
-                  <option value="ESP">español</option>  
-                  <option value="TRK">Türk dili</option>  
-                  <option value="UKR">українська мова</option>  
-                  <option value="VIN">Tiếng Việt</option>  
-                  <option value="ARA">العربية</option>  
-                  <option value="CNR">crnogorski jezik</option>  
-                  <option value="SRP">српски језик</option>  
-                  <option value="HRV">hrvatski jezik</option>  
-                  <option value="THA">ภาษาไทย</option>  
-                  <option value="IND">Indonesia</option>  
-                  <option value="FIL">Wikang Filipino</option>  
+                  <!-- Outputs: English (main) and Indonesian (sub) only -->
+                  <option value="ENG">English</option>
+                  <option value="IND">Indonesia</option>
               </select>  
               <i
                 class="iconify absolute top-1 right-1 text-gray-500 pointer-events-none"
@@ -187,10 +161,11 @@
                 v-model="inpaintingSize"
                 @change="onSettingChange"
               >
-                <option value="516">516px</option>
+                <option value="original">Original</option>
                 <option value="1024">1024px</option>
+                <option value="1280">1280px</option>
+                <option value="1600">1600px</option>
                 <option value="2048">2048px</option>
-                <option value="2560">2560px</option>
               </select>
               <i
                 class="iconify absolute top-1 right-1 text-gray-500 pointer-events-none"
@@ -812,7 +787,7 @@
           'rendering': 9,
           'finished': 10
         },
-        detectionResolution: "1536",
+        detectionResolution: "original",  // FIX: detection always at original size
         textDetector: "default",
         renderTextDirection: "auto",
         translator: "youdao",
@@ -846,7 +821,7 @@
           if (key === "none") return "No Text";
           return key ? key[0].toUpperCase() + key.slice(1) : "";
         },
-        targetLanguage: "CHS",
+        targetLanguage: "ENG",  // FIX: default main output is English (was CHS)
         inpaintingSize: "2048",
         customUnclipRatio: 2.3,
         customBoxThreshold: 0.7,
@@ -866,12 +841,22 @@
             const saved = localStorage.getItem('manga-translator-settings');
             if (saved) {
               const settings = JSON.parse(saved);
-              if (settings.detectionResolution) this.detectionResolution = settings.detectionResolution;
+              // FIX: detection is always 'original' now; ignore old saved values.
+              this.detectionResolution = 'original';
               if (settings.textDetector) this.textDetector = settings.textDetector;
               if (settings.renderTextDirection) this.renderTextDirection = settings.renderTextDirection;
               if (settings.translator) this.translator = settings.translator;
-              if (settings.targetLanguage) this.targetLanguage = settings.targetLanguage;
-              if (settings.inpaintingSize) this.inpaintingSize = settings.inpaintingSize;
+              // FIX: only ENG (main) and IND (sub) are active outputs; if an
+              // old saved setting uses a now-disabled language, fall back to ENG.
+              if (settings.targetLanguage) {
+                this.targetLanguage = ['ENG', 'IND'].includes(settings.targetLanguage)
+                  ? settings.targetLanguage : 'ENG';
+              }
+              // FIX: only accept sizes that still exist in the new list.
+              if (settings.inpaintingSize) {
+                this.inpaintingSize = ['original', '1024', '1280', '1600', '2048']
+                  .includes(String(settings.inpaintingSize)) ? String(settings.inpaintingSize) : '2048';
+              }
               if (settings.customUnclipRatio) this.customUnclipRatio = settings.customUnclipRatio;
               if (settings.customBoxThreshold) this.customBoxThreshold = settings.customBoxThreshold;
               if (settings.maskDilationOffset) this.maskDilationOffset = settings.maskDilationOffset;
@@ -1213,10 +1198,28 @@
           const formData = new FormData();
           formData.append("image", queuedImage.file);
 
+          // FIX: resolve the 'original' size options into real numbers.
+          // - Detection: use the image's own longest side, so the detector
+          //   effectively runs at the original resolution (no rescaling).
+          // - Inpainting: the backend only DOWNSCALES when the image is larger
+          //   than inpainting_size, so a very large value = keep original size.
+          let detectionSizeValue = this.detectionResolution;
+          if (detectionSizeValue === 'original') {
+            const dims = await new Promise((resolve) => {
+              const url = URL.createObjectURL(queuedImage.file);
+              const img = new Image();
+              img.onload = () => { const d = { w: img.naturalWidth, h: img.naturalHeight }; URL.revokeObjectURL(url); resolve(d); };
+              img.onerror = () => { URL.revokeObjectURL(url); resolve({ w: 0, h: 0 }); };
+              img.src = url;
+            });
+            detectionSizeValue = Math.max(dims.w, dims.h) || 2048;
+          }
+          const inpaintingSizeValue = this.inpaintingSize === 'original' ? 99999 : this.inpaintingSize;
+
           const config = `{
           "detector": {
             "detector": "${this.textDetector}",
-            "detection_size": ${this.detectionResolution},
+            "detection_size": ${detectionSizeValue},
             "box_threshold": ${this.customBoxThreshold},
             "unclip_ratio": ${this.customUnclipRatio}
           },
@@ -1229,7 +1232,7 @@
           },
           "inpainter": {
             "inpainter": "${this.inpainter}",
-            "inpainting_size": ${this.inpaintingSize}
+            "inpainting_size": ${inpaintingSizeValue}
           },
           "mask_dilation_offset": ${this.maskDilationOffset}
         }`;

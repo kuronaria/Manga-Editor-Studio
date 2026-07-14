@@ -36,6 +36,8 @@ class Pipeline:
             font_path = config_dict.pop('font_path', None)
             pre_dict_path = config_dict.pop('pre_dict_path', None)
             post_dict_path = config_dict.pop('post_dict_path', None)
+            # FIX: GUI-only key, must not end up in the backend config JSON
+            config_dict.pop('processing_device', None)
 
             config_path = os.path.join(self.temp_dir, f"temp_config_job_{job['id']}.json")
             with open(config_path, 'w', encoding='utf-8') as f:
@@ -85,6 +87,12 @@ class Pipeline:
             shutil.copy(test_image_path, temp_input_dir)
 
             output_format = config_dict.pop('output_format_cli', None)
+            # FIX: extract the same CLI-only keys as run(); previously
+            # font_path / dict paths leaked into the config JSON here.
+            font_path = config_dict.pop('font_path', None)
+            pre_dict_path = config_dict.pop('pre_dict_path', None)
+            post_dict_path = config_dict.pop('post_dict_path', None)
+            use_gpu = config_dict.pop('processing_device', None) == 'NVIDIA GPU'
 
             config_path = os.path.join(self.temp_dir, "temp_config_visual_test.json")
             with open(config_path, 'w', encoding='utf-8') as f:
@@ -98,7 +106,14 @@ class Pipeline:
             if output_format:
                 command.extend(["-f", output_format])
 
-            if config_dict.get('processing_device') == 'NVIDIA GPU':
+            if font_path:
+                command.extend(["--font-path", os.path.join(self.app.project_base_dir, font_path)])
+            if pre_dict_path:
+                command.extend(["--pre-dict", os.path.join(self.app.project_base_dir, pre_dict_path)])
+            if post_dict_path:
+                command.extend(["--post-dict", os.path.join(self.app.project_base_dir, post_dict_path)])
+
+            if use_gpu:
                 command.append("--use-gpu")
 
             return self._execute_subprocess(log_callback, command)

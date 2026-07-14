@@ -31,8 +31,22 @@ class ConfigLoader:
             return venv_path_unix
         return sys.executable
 
+    def _is_cache_stale(self):
+        """
+        FIX: the schema cache previously never expired, so a backend update
+        would leave the UI running against an outdated schema. The cache is
+        now considered stale when manga_translator/config.py is newer than it.
+        """
+        try:
+            backend_config = os.path.join(self.project_base_dir, 'manga_translator', 'config.py')
+            if os.path.exists(backend_config):
+                return os.path.getmtime(backend_config) > os.path.getmtime(self.cache_path)
+        except OSError:
+            pass
+        return False
+
     def _load_backend_schema(self):
-        if os.path.exists(self.cache_path):
+        if os.path.exists(self.cache_path) and not self._is_cache_stale():
             try:
                 with open(self.cache_path, 'r', encoding='utf-8') as f:
                     print("[ConfigLoader] Loading schema from cache...")

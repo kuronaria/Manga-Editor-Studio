@@ -78,7 +78,7 @@ TRANSLATOR_CAPABILITIES = {
 
     # --- SPECIALIZED APIs (Limited pairs) ---
     "papago": {  # Based on Naver Papago's known strengths
-        'KOR': ['ENG', 'JPN', 'CHS', 'CHT', 'FRA', 'DEU', 'RUS', 'ESP', 'ITA', 'VIE', 'THA', 'IND'],
+        'KOR': ['ENG', 'JPN', 'CHS', 'CHT', 'FRA', 'DEU', 'RUS', 'ESP', 'ITA', 'VIN', 'THA', 'IND'],
         'JPN': ['ENG', 'KOR', 'CHS', 'CHT'],
         'CHS': ['ENG', 'KOR', 'JPN'],
         'CHT': ['ENG', 'KOR', 'JPN'],
