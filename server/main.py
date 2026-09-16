@@ -106,6 +106,168 @@ async def json_form(req: Request, image: UploadFile = File(...), config: str = F
     ctx = await get_ctx(req, conf, img)
     return to_translation(ctx)
 
+@app.post("/translate/with-form/ocr", tags=["api", "form"],
+          response_description="Lightweight OCR result: detected text regions with coordinates, no image data")
+async def ocr_form(req: Request, image: UploadFile = File(...), config: str = Form("{}"),
+                   include_cleaned: str = Form("false")):
+    """Runs the pipeline and returns the recognised text + boxes as plain JSON.
+    Used by the editor's 'Read kanji' button and per-page Auto-TL. Avoids the
+    numpy-heavy TranslationResponse which cannot be serialised under pydantic v2.
+
+    If include_cleaned is truthy, also returns the inpainted (text-removed) page
+    as a base64 PNG so Auto-TL can drop it on the Clean layer — this is why the
+    original Japanese no longer overlaps the translation.
+
+    On failure it returns the error text (status 200) so the editor can show
+    the real cause instead of an opaque 500."""
+    import traceback as _tb
+    try:
+        img = await image.read()
+        conf = Config.parse_raw(config)
+        ctx = await get_ctx(req, conf, img)
+
+        text_regions = getattr(ctx, "text_regions", None)
+        if text_regions is None and isinstance(ctx, dict):
+            text_regions = ctx.get("text_regions")
+
+        regions = []
+        for blk in (text_regions or []):
+            try:
+                xy = list(blk.xyxy)
+                minX, minY, maxX, maxY = [int(v) for v in xy]
+                regions.append({
+                    "minX": minX, "minY": minY, "maxX": maxX, "maxY": maxY,
+                    "text": getattr(blk, "text", "") or "",
+                })
+            except Exception:
+                continue
+
+        out = {"regions": regions}
+        if str(include_cleaned).lower() in ("1", "true", "yes"):
+            try:
+                import io as _io, base64 as _b64
+                cleaned_img = getattr(ctx, "result", None)
+                if cleaned_img is not None:
+                    buf = _io.BytesIO()
+                    cleaned_img.save(buf, format="PNG")
+                    out["cleaned"] = "data:image/png;base64," + _b64.b64encode(buf.getvalue()).decode("ascii")
+            except Exception as ce:
+                out["cleaned_error"] = str(ce)
+        return out
+    except Exception as e:
+        print("[OCR endpoint error]\n" + _tb.format_exc())
+        return {"error": str(e), "trace": _tb.format_exc()[-1800:], "regions": []}
+
+@app.post("/editor/gemini_ocr", tags=["editor"],
+          response_description="Gemini vision: OCR + romaji + translation for one crop")
+async def gemini_ocr(image: UploadFile = File(...), target_lang: str = Form("English")):
+    """Sends one image crop to Gemini and gets back the Japanese text, its
+    romaji, and a translation in a single call. Uses GEMINI_API_KEY / GEMINI_MODEL
+    from .env (same plumbing as the gemini translator). Key stays server-side."""
+    import traceback as _tb, json as _json
+    try:
+        from google import genai
+        from google.genai import types
+        from manga_translator.translators.keys import GEMINI_API_KEY, GEMINI_MODEL
+        if not GEMINI_API_KEY:
+            return {"error": "GEMINI_API_KEY is empty. Set it in .env."}
+        if not GEMINI_MODEL:
+            return {"error": "GEMINI_MODEL is empty. Set it in .env (e.g. gemini-2.5-flash)."}
+
+        img = await image.read()
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        prompt = (
+            "This image is a cropped region from a Japanese manga page. "
+            "Read ALL Japanese text in it exactly as written, including small, "
+            "vertical, or stylized text. Then provide its romaji and a natural "
+            f"{target_lang} translation. Respond ONLY with JSON of the form: "
+            '{"source": "...", "romaji": "...", "translation": "..."} '
+            "with no code fences. If there is no readable text, use empty strings."
+        )
+        contents = [types.Content(role="user", parts=[
+            types.Part.from_bytes(data=img, mime_type=(image.content_type or "image/png")),
+            types.Part.from_text(text=prompt),
+        ])]
+        resp = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        raw = (resp.text or "").strip()
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            cleaned = raw.strip("`").strip()
+            if cleaned[:4].lower() == "json":
+                cleaned = cleaned[4:].strip()
+            data = _json.loads(cleaned)
+        return {
+            "source": (data.get("source") or "").strip(),
+            "romaji": (data.get("romaji") or "").strip(),
+            "translation": (data.get("translation") or "").strip(),
+        }
+    except Exception as e:
+        print("[gemini_ocr error]\n" + _tb.format_exc())
+        return {"error": str(e)}
+
+@app.post("/editor/gemini_translate", tags=["editor"],
+          response_description="Translate a list of Japanese lines (+romaji) in one Gemini call")
+async def gemini_translate(req: Request):
+    """Text-only batch translation for the editor's per-page auto-translate.
+    Boxes/OCR come from the local detector; this only does the language step,
+    so one small request covers a whole page (well within a 20k TPM cap)."""
+    import traceback as _tb, json as _json
+    try:
+        body = await req.json()
+        texts = body.get("texts") or []
+        target_lang = body.get("target_lang") or "English"
+        if not texts:
+            return {"items": []}
+        from google import genai
+        from google.genai import types
+        from manga_translator.translators.keys import GEMINI_API_KEY, GEMINI_MODEL
+        if not GEMINI_API_KEY:
+            return {"error": "GEMINI_API_KEY is empty. Set it in .env."}
+        if not GEMINI_MODEL:
+            return {"error": "GEMINI_MODEL is empty. Set it in .env."}
+
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+        prompt = (
+            "These are Japanese text lines from one manga page (each line is a "
+            "separate speech bubble or caption). Translate each into natural "
+            f"{target_lang}. Keep the SAME order and the SAME number of items. "
+            "For every line also give its romaji. Respond ONLY with a JSON array "
+            'like [{"romaji":"...","translation":"..."}, ...] with exactly one '
+            "object per input line, no code fences.\n\n" + numbered
+        )
+        resp = await client.aio.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=prompt)])],
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
+        )
+        raw = (resp.text or "").strip()
+        try:
+            arr = _json.loads(raw)
+        except Exception:
+            cleaned = raw.strip("`").strip()
+            if cleaned[:4].lower() == "json":
+                cleaned = cleaned[4:].strip()
+            arr = _json.loads(cleaned)
+        if not isinstance(arr, list):
+            arr = []
+        items = []
+        for i in range(len(texts)):
+            it = arr[i] if i < len(arr) and isinstance(arr[i], dict) else {}
+            items.append({
+                "romaji": (it.get("romaji") or "").strip(),
+                "translation": (it.get("translation") or "").strip(),
+            })
+        return {"items": items}
+    except Exception as e:
+        print("[gemini_translate error]\n" + _tb.format_exc())
+        return {"error": str(e)}
+
 @app.post("/translate/with-form/bytes", response_class=StreamingResponse, tags=["api", "form"],response_description="custom byte structure for decoding look at examples in 'examples/response.*'")
 async def bytes_form(req: Request, image: UploadFile = File(...), config: str = Form("{}")):
     img = await image.read()
@@ -237,6 +399,17 @@ async def manual():
     html_file = script_directory / "manual.html"
     html_content = html_file.read_text(encoding="utf-8")
     return HTMLResponse(content=html_content)
+
+@app.get("/editor", response_class=HTMLResponse, tags=["ui"])
+async def editor():
+    script_directory = Path(__file__).parent
+    html_file = script_directory / "editor.html"
+    html_content = html_file.read_text(encoding="utf-8")
+    return HTMLResponse(content=html_content)
+
+# Serve the bundled scanlation fonts so the editor's typeset panel can use them
+# (referenced as ../fonts/*.ttf, which resolves to /fonts/*.ttf under /editor).
+app.mount("/fonts", StaticFiles(directory=str(BASE_DIR.parent / "fonts")), name="fonts")
 
 def generate_nonce():
     return secrets.token_hex(16)

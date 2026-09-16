@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manga Studio — Editor</title>
+  <link rel="icon" type="image/png" href="https://avatars.githubusercontent.com/u/17797982?s=48&v=4">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    @font-face { font-family: 'Anime Ace';   src: url('../fonts/anime_ace.ttf'); font-display: swap; }
+    @font-face { font-family: 'Anime Ace 3'; src: url('../fonts/anime_ace_3.ttf'); font-display: swap; }
+    @font-face { font-family: 'Comic Shanns'; src: url('../fonts/comic shanns 2.ttf'); font-display: swap; }
+    #stage-wrap {
+      background-color: #1f2430;
+      background-image:
+        linear-gradient(45deg, #262b38 25%, transparent 25%),
+        linear-gradient(-45deg, #262b38 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #262b38 75%),
+        linear-gradient(-45deg, transparent 75%, #262b38 75%);
+      background-size: 24px 24px;
+      background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+    }
+    .tool-active { background:#2563eb !important; }
+  </style>
+</head>
+<body class="h-full bg-gray-900 text-gray-100 overflow-hidden">
+  <div class="flex flex-col h-full">
+
+    <!-- Top toolbar -->
+    <header class="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
+      <span class="font-semibold text-sm mr-2">Manga Studio · Editor</span>
+      <button id="btn-open"   class="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-700">Open image(s)</button>
+      <span class="w-px h-5 bg-gray-600 mx-1"></span>
+      <button id="tool-select" class="tool-active px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Select / pan (V)">Select</button>
+      <button id="tool-text"   class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Draw box: click a corner, then the opposite corner (T)">▭ Text</button>
+      <button id="tool-inpaint" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Clean/redraw a region via inpainting (C)">▧ Clean</button>
+      <button id="tool-brush" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Manual brush: white / black / erase (B)">✎ Brush</button>
+      <span class="w-px h-5 bg-gray-600 mx-1"></span>
+      <button id="btn-fit"    class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">Fit</button>
+      <button id="btn-100"    class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">100%</button>
+      <button id="btn-autotl" class="px-3 py-1.5 text-sm rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40" disabled title="Auto-translate whole page: local detect + Gemini">Auto-TL</button>
+      <button id="btn-export" class="px-3 py-1.5 text-sm rounded bg-green-600 hover:bg-green-700 disabled:opacity-40" disabled>Export PNG</button>
+      <div class="ml-auto text-xs text-gray-400">
+        <span id="hint" class="text-blue-300"></span>
+        <span class="mx-2">·</span>
+        <span id="img-size">—</span>
+        <span class="mx-2">·</span>
+        <span id="zoom-label">100%</span>
+      </div>
+      <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" multiple class="hidden" />
+    </header>
+
+    <div class="flex flex-1 min-h-0">
+      <!-- Left sidebar: Pages -->
+      <aside class="w-52 shrink-0 bg-gray-800 border-r border-gray-700 flex flex-col min-h-0">
+        <div class="p-3 flex flex-col flex-1 min-h-0">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400">Pages</h2>
+            <span id="page-count" class="text-[11px] text-gray-500"></span>
+          </div>
+          <div id="page-list" class="space-y-1 overflow-y-auto pr-1 flex-1"></div>
+          <p id="page-empty" class="text-[11px] text-gray-500">No pages yet. Drop or open image(s).</p>
+        </div>
+      </aside>
+
+      <!-- Canvas -->
+      <div id="stage-wrap" class="relative flex-1 min-w-0">
+        <div id="stage" class="absolute inset-0"></div>
+        <div id="drop-hint" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-gray-400">
+          <div class="text-lg font-medium">Drop image(s) here</div>
+          <div class="text-sm mt-1">or click “Open image(s)”</div>
+        </div>
+        <div id="drag-overlay" class="absolute inset-0 hidden items-center justify-center bg-blue-600/20 border-4 border-dashed border-blue-400 pointer-events-none">
+          <div class="text-blue-200 text-lg font-semibold">Release to load</div>
+        </div>
+
+        <!-- Brush size cursor (follows mouse in Brush tool) -->
+        <div id="brush-cursor" class="hidden absolute rounded-full border-2 border-white pointer-events-none" style="mix-blend-mode: difference;"></div>
+      </div>
+
+      <!-- Right sidebar -->
+      <aside class="w-64 shrink-0 bg-gray-800 border-l border-gray-700 p-3 overflow-y-auto">
+        <div id="text-panel" class="hidden mb-4 pb-4 border-b border-gray-700">
+          <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Box</h2>
+
+          <label class="block text-[11px] text-gray-400 mb-1">Source (kanji)</label>
+          <textarea id="tp-source" rows="2" class="w-full text-sm rounded bg-gray-900 border border-gray-600 p-2 mb-1 resize-none" placeholder="OCR result appears here…"></textarea>
+          <div id="tp-romaji" class="text-[11px] text-gray-400 mb-2 min-h-[14px] italic"></div>
+          <div class="flex gap-1 mb-3">
+            <select id="tp-provider" class="text-xs rounded bg-gray-900 border border-gray-600 px-1.5">
+              <option value="local">Local (manga-ocr)</option>
+              <option value="gemini">Gemini (cloud)</option>
+            </select>
+            <button id="tp-ocr" class="flex-1 text-xs rounded bg-indigo-600 hover:bg-indigo-700 py-1.5">Read (OCR)</button>
+          </div>
+
+          <label class="block text-[11px] text-gray-400 mb-1">Translation</label>
+          <textarea id="tp-text" rows="3" class="w-full text-sm rounded bg-gray-900 border border-gray-600 p-2 mb-2 resize-none" placeholder="Type translation…"></textarea>
+
+          <label class="block text-[11px] text-gray-400 mb-1">Font</label>
+          <select id="tp-font" class="w-full text-sm rounded bg-gray-900 border border-gray-600 p-1.5 mb-2"></select>
+
+          <div class="flex gap-2 mb-2">
+            <div class="flex-1">
+              <label class="block text-[11px] text-gray-400 mb-1">Size</label>
+              <input id="tp-size" type="number" min="6" max="300" class="w-full text-sm rounded bg-gray-900 border border-gray-600 p-1.5">
+            </div>
+            <div class="flex-1">
+              <label class="block text-[11px] text-gray-400 mb-1">Line height</label>
+              <input id="tp-lh" type="number" min="0.6" max="3" step="0.05" class="w-full text-sm rounded bg-gray-900 border border-gray-600 p-1.5">
+            </div>
+          </div>
+
+          <label class="block text-[11px] text-gray-400 mb-1">Align</label>
+          <div class="flex gap-1 mb-2">
+            <button data-align="left"   class="tp-align flex-1 text-sm rounded bg-gray-700 hover:bg-gray-600 py-1">L</button>
+            <button data-align="center" class="tp-align flex-1 text-sm rounded bg-gray-700 hover:bg-gray-600 py-1">C</button>
+            <button data-align="right"  class="tp-align flex-1 text-sm rounded bg-gray-700 hover:bg-gray-600 py-1">R</button>
+          </div>
+
+          <div class="flex gap-2 mb-2">
+            <div class="flex-1">
+              <label class="block text-[11px] text-gray-400 mb-1">Fill</label>
+              <input id="tp-fill" type="color" value="#000000" class="w-full h-8 rounded bg-gray-900 border border-gray-600">
+            </div>
+            <div class="flex-1">
+              <label class="block text-[11px] text-gray-400 mb-1">Outline</label>
+              <input id="tp-stroke" type="color" value="#ffffff" class="w-full h-8 rounded bg-gray-900 border border-gray-600">
+            </div>
+            <div class="w-14">
+              <label class="block text-[11px] text-gray-400 mb-1">Width</label>
+              <input id="tp-strokew" type="number" min="0" max="20" step="0.5" value="0" class="w-full text-sm rounded bg-gray-900 border border-gray-600 p-1.5">
+            </div>
+          </div>
+
+          <button id="tp-delete" class="w-full text-sm rounded bg-red-600 hover:bg-red-700 py-1.5 mt-1">Delete box</button>
+        </div>
+
+        <div id="brush-panel" class="hidden mb-4 pb-4 border-b border-gray-700">
+          <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Brush</h2>
+          <div class="flex gap-1 mb-3">
+            <button data-brush="white" class="bp-color flex-1 text-sm rounded bg-gray-700 hover:bg-gray-600 py-1">White</button>
+            <button data-brush="black" class="bp-color flex-1 text-sm rounded bg-gray-700 hover:bg-gray-600 py-1">Black</button>
+            <button data-brush="erase" class="bp-color flex-1 text-sm rounded bg-gray-700 hover:bg-gray-600 py-1">Erase</button>
+          </div>
+          <label class="block text-[11px] text-gray-400 mb-1">Size: <span id="bp-size-val">20</span> px</label>
+          <input id="bp-size" type="range" min="2" max="150" value="20" class="w-full accent-blue-500">
+          <p class="text-[11px] text-gray-500 mt-2">Paints on the Clean layer. Erase reveals the original.</p>
+        </div>
+
+        <h2 class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Layers</h2>
+        <div class="space-y-2">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="layer-base" checked class="accent-blue-500"> Base image</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="layer-clean" checked class="accent-blue-500"> Clean (brush)</label>
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="layer-text" checked class="accent-blue-500"> Text</label>
+        </div>
+
+        <div class="mt-4 pt-3 border-t border-gray-700 text-[11px] text-gray-400 leading-relaxed">
+          <p><b>Select</b>: drag = pan · click box = select</p>
+          <p><b>Text</b>: click a corner, then the opposite corner</p>
+          <p>Scroll = zoom · Del = delete · Esc = cancel</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const stageWrap  = document.getElementById('stage-wrap');
+      const dropHint   = document.getElementById('drop-hint');
+      const dragOv     = document.getElementById('drag-overlay');
+      const zoomLabel  = document.getElementById('zoom-label');
+      const imgSizeEl  = document.getElementById('img-size');
+      const hintEl     = document.getElementById('hint');
+      const fileInput  = document.getElementById('file-input');
+      const btnExport  = document.getElementById('btn-export');
+      const pageListEl = document.getElementById('page-list');
+      const pageEmptyEl= document.getElementById('page-empty');
+      const pageCountEl= document.getElementById('page-count');
+      const textPanel  = document.getElementById('text-panel');
+      const brushPanel = document.getElementById('brush-panel');
+      const brushCursor = document.getElementById('brush-cursor');
+      const PAD = 4;
+      const FONTS = ['Anime Ace', 'Anime Ace 3', 'Comic Shanns', 'Arial', 'Comic Sans MS'];
+
+      const stage = new Konva.Stage({ container: 'stage', width: stageWrap.clientWidth, height: stageWrap.clientHeight, draggable: true });
+      const baseLayer = new Konva.Layer(), cleanLayer = new Konva.Layer(), textLayer = new Konva.Layer();
+      stage.add(baseLayer, cleanLayer, textLayer);
+
+      const tr = new Konva.Transformer({
+        rotateEnabled: true, keepRatio: false,
+        enabledAnchors: ['top-left','top-center','top-right','middle-left','middle-right','bottom-left','bottom-center','bottom-right'],
+        borderStroke: '#3b82f6', anchorStroke: '#3b82f6', anchorFill: '#ffffff', anchorSize: 9,
+      });
+      textLayer.add(tr);
+
+      let baseImage = null, imgW = 0, imgH = 0, fitScale = 1;
+      let pages = [], activePageId = null;
+      let currentTool = 'select', selected = null;
+      let brushColor = 'white', brushSize = 20, painting = false, curLine = null;
+
+      // ---------- View ----------
+      function updateZoomLabel(s) { zoomLabel.textContent = Math.round((s ?? stage.scaleX()) * 100) + '%'; }
+      function computeFitScale() { fitScale = Math.min(stageWrap.clientWidth / imgW, stageWrap.clientHeight / imgH); }
+      function clampPos(pos) {
+        if (!imgW) return pos;
+        const cw = stageWrap.clientWidth, ch = stageWrap.clientHeight, s = stage.scaleX(), sw = imgW * s, sh = imgH * s;
+        let x = pos.x, y = pos.y;
+        if (sw <= cw) x = (cw - sw) / 2; else x = Math.min(0, Math.max(cw - sw, x));
+        if (sh <= ch) y = (ch - sh) / 2; else y = Math.min(0, Math.max(ch - sh, y));
+        return { x, y };
+      }
+      stage.dragBoundFunc(pos => clampPos(pos));
+      function zoomTo(s) { if (!imgW) return; stage.scale({ x: s, y: s }); stage.position(clampPos(stage.position())); stage.batchDraw(); updateZoomLabel(s); }
+      function fitToScreen() {
+        if (!imgW) return; computeFitScale();
+        stage.scale({ x: fitScale, y: fitScale });
+        stage.position({ x: (stageWrap.clientWidth - imgW * fitScale) / 2, y: (stageWrap.clientHeight - imgH * fitScale) / 2 });
+        stage.batchDraw(); updateZoomLabel(fitScale);
+      }
+
+      // ---------- Pages ----------
+      function addFiles(list) {
+        const files = Array.from(list).filter(f => f.type && f.type.startsWith('image/'));
+        let firstNew = null;
+        files.forEach(file => {
+          const id = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+          const url = URL.createObjectURL(file), imgObj = new Image();
+          const page = { id, name: file.name, url, imgObj, w: 0, h: 0, ready: false };
+          imgObj.onload = () => { page.w = imgObj.naturalWidth; page.h = imgObj.naturalHeight; page.ready = true; renderPageList(); if (activePageId === id) switchPage(id); };
+          imgObj.src = url; pages.push(page); if (!firstNew) firstNew = id;
+        });
+        renderPageList(); if (!activePageId && firstNew) switchPage(firstNew);
+      }
+      function switchPage(id) {
+        const page = pages.find(p => p.id === id); if (!page) return;
+        activePageId = id; if (!page.ready) { renderPageList(); return; }
+        imgW = page.w; imgH = page.h;
+        if (baseImage) baseImage.destroy();
+        baseImage = new Konva.Image({ image: page.imgObj, x: 0, y: 0, width: imgW, height: imgH });
+        baseLayer.add(baseImage); baseLayer.batchDraw();
+        dropHint.style.display = 'none'; btnExport.disabled = false;
+        document.getElementById('btn-autotl').disabled = false;
+        imgSizeEl.textContent = imgW + ' × ' + imgH + ' px';
+        fitToScreen(); renderPageList();
+      }
+      function renderPageList() {
+        pageListEl.innerHTML = '';
+        pageEmptyEl.style.display = pages.length ? 'none' : 'block';
+        pageCountEl.textContent = pages.length ? pages.length + (pages.length > 1 ? ' pages' : ' page') : '';
+        pages.forEach((p, i) => {
+          const item = document.createElement('button');
+          item.className = 'w-full flex items-center gap-2 p-1 rounded text-left ' + (p.id === activePageId ? 'bg-blue-600/30 ring-1 ring-blue-500' : 'hover:bg-gray-700');
+          const thumb = document.createElement('img'); thumb.src = p.url; thumb.className = 'w-9 h-12 object-cover rounded bg-gray-900 border border-gray-700 shrink-0';
+          const label = document.createElement('span'); label.className = 'text-xs text-gray-300 truncate'; label.textContent = (i + 1) + '. ' + p.name;
+          item.appendChild(thumb); item.appendChild(label);
+          item.addEventListener('click', () => switchPage(p.id));
+          pageListEl.appendChild(item);
+        });
+      }
+
+      // ---------- Tools ----------
+      function setTool(tool) {
+        currentTool = tool;
+        stage.draggable(tool === 'select');
+        textLayer.listening(tool === 'select');   // boxes only interactive in Select
+        ['select', 'text', 'inpaint', 'brush'].forEach(t =>
+          document.getElementById('tool-' + t).classList.toggle('tool-active', tool === t));
+        const drawTool = (tool === 'text' || tool === 'inpaint');
+        stageWrap.style.cursor = tool === 'brush' ? 'none' : (drawTool ? 'crosshair' : 'default');
+        hintEl.textContent = drawTool ? (placing ? 'Click opposite corner' : 'Click first corner') : '';
+        brushPanel.classList.toggle('hidden', tool !== 'brush');
+        brushCursor.classList.toggle('hidden', tool !== 'brush');
+        if (tool !== 'select') { tr.nodes([]); textPanel.classList.add('hidden'); }
+        textLayer.batchDraw();
+      }
+      document.getElementById('tool-select').addEventListener('click', () => { cancelPlacing(); setTool('select'); });
+      document.getElementById('tool-text').addEventListener('click', () => setTool('text'));
+      document.getElementById('tool-inpaint').addEventListener('click', () => setTool('inpaint'));
+      document.getElementById('tool-brush').addEventListener('click', () => setTool('brush'));
+
+      // ---------- Boxes (region + text) ----------
+      function innerText(group) { return group.findOne('.boxtext'); }
+
+      function selectNode(group) {
+        selected = group || null;
+        tr.nodes(group ? [group] : []);
+        textLayer.batchDraw();
+        if (group) { textPanel.classList.remove('hidden'); syncPanel(group); } else textPanel.classList.add('hidden');
+      }
+
+      function createBox(x, y, w, h, opts) {
+        opts = opts || {};
+        const group = new Konva.Group({ x, y, draggable: true, name: 'tbox' });
+        const rect = new Konva.Rect({ x: 0, y: 0, width: w, height: h, name: 'boxrect',
+          fill: 'rgba(59,130,246,0.04)', stroke: '#3b82f6', strokeWidth: 1, dash: [4, 4], strokeScaleEnabled: false });
+        const text = new Konva.Text({ x: PAD, y: PAD, width: w - 2 * PAD, height: h - 2 * PAD, name: 'boxtext',
+          text: opts.translation || '', fontSize: 24, fontFamily: 'Anime Ace', fill: '#000000',
+          align: 'center', verticalAlign: 'middle', wrap: 'word', lineHeight: 1.1 });
+        text.setAttr('source', opts.source || '');
+        text.setAttr('romaji', opts.romaji || '');
+        group.add(rect, text);
+        group.on('transformend', () => {
+          const sx = group.scaleX(), sy = group.scaleY();
+          group.scale({ x: 1, y: 1 });
+          const nw = Math.max(20, rect.width() * sx), nh = Math.max(20, rect.height() * sy);
+          rect.width(nw); rect.height(nh);
+          text.width(nw - 2 * PAD); text.height(nh - 2 * PAD);
+          textLayer.batchDraw();
+        });
+        group.on('click tap', (e) => { e.cancelBubble = true; selectNode(group); });
+        group.on('dblclick dbltap', () => document.getElementById('tp-text').focus());
+        group.on('mouseenter', () => { if (currentTool === 'select') stageWrap.style.cursor = 'move'; });
+        group.on('mouseleave', () => { if (currentTool === 'select') stageWrap.style.cursor = 'default'; });
+        textLayer.add(group);
+        if (opts.select !== false) selectNode(group);
+        textLayer.batchDraw();
+        return group;
+      }
+
+      // ---------- Two-click placement ----------
+      let placing = false, c1 = null, preview = null;
+      function cancelPlacing() { if (preview) { preview.destroy(); preview = null; } placing = false; textLayer.batchDraw(); if (currentTool === 'text') hintEl.textContent = 'Click first corner'; }
+
+      // Click 1 = first corner, click 2 = opposite corner. Preview is
+      // listening:false so it never swallows the second click.
+      stage.on('click tap', (e) => {
+        if (currentTool === 'text' || currentTool === 'inpaint') {
+          const p = stage.getRelativePointerPosition();
+          if (!placing) {
+            if (e.target !== stage && e.target !== baseImage) return;
+            placing = true; c1 = p;
+            const col = currentTool === 'inpaint' ? '#22c55e' : '#3b82f6';
+            preview = new Konva.Rect({ x: p.x, y: p.y, width: 0, height: 0, stroke: col, dash: [4, 4], strokeScaleEnabled: false, listening: false });
+            textLayer.add(preview); textLayer.batchDraw();
+            hintEl.textContent = 'Click opposite corner';
+          } else {
+            placing = false;
+            const tool = currentTool;
+            const w = Math.abs(p.x - c1.x), h = Math.abs(p.y - c1.y);
+            const x = Math.min(c1.x, p.x), y = Math.min(c1.y, p.y);
+            if (preview) { preview.destroy(); preview = null; }
+            if (w >= 8 && h >= 8) {
+              if (tool === 'text') createBox(x, y, w, h);
+              else inpaintRegion(x, y, w, h);
+            }
+            setTool('select'); // auto-return to Select after one action
+          }
+          return;
+        }
+        // Select mode: click empty space to deselect
+        if (e.target === stage || e.target === baseImage) selectNode(null);
+      });
+      stage.on('mousemove touchmove', () => {
+        if (!placing || !preview) return;
+        const p = stage.getRelativePointerPosition();
+        preview.width(p.x - c1.x); preview.height(p.y - c1.y);
+        textLayer.batchDraw();
+      });
+
+      // ---------- Panel ----------
+      const tpSource = document.getElementById('tp-source');
+      const tpText = document.getElementById('tp-text');
+      const tpFont = document.getElementById('tp-font');
+      const tpSize = document.getElementById('tp-size');
+      const tpLh = document.getElementById('tp-lh');
+      const tpFill = document.getElementById('tp-fill');
+      const tpStroke = document.getElementById('tp-stroke');
+      const tpStrokeW = document.getElementById('tp-strokew');
+      FONTS.forEach(f => { const o = document.createElement('option'); o.value = f; o.textContent = f; tpFont.appendChild(o); });
+
+      function syncPanel(group) {
+        const t = innerText(group);
+        tpSource.value = t.getAttr('source') || '';
+        const rj = t.getAttr('romaji') || '';
+        document.getElementById('tp-romaji').textContent = rj ? ('romaji: ' + rj) : '';
+        tpText.value = t.text();
+        tpFont.value = t.fontFamily();
+        tpSize.value = Math.round(t.fontSize());
+        tpLh.value = t.lineHeight();
+        tpFill.value = (t.fill() || '#000000').slice(0, 7);
+        tpStroke.value = (t.stroke() || '#ffffff').slice(0, 7);
+        tpStrokeW.value = t.strokeWidth() || 0;
+        document.querySelectorAll('.tp-align').forEach(b => b.classList.toggle('tool-active', b.dataset.align === t.align()));
+      }
+      function withText(fn) { if (selected) { fn(innerText(selected)); textLayer.batchDraw(); } }
+      tpSource.addEventListener('input', () => withText(t => t.setAttr('source', tpSource.value)));
+      tpText.addEventListener('input', () => withText(t => t.text(tpText.value)));
+      tpFont.addEventListener('change', () => withText(t => t.fontFamily(tpFont.value)));
+      tpSize.addEventListener('input', () => withText(t => t.fontSize(+tpSize.value || 24)));
+      tpLh.addEventListener('input', () => withText(t => t.lineHeight(+tpLh.value || 1.1)));
+      tpFill.addEventListener('input', () => withText(t => t.fill(tpFill.value)));
+      tpStroke.addEventListener('input', () => withText(t => t.stroke(tpStroke.value)));
+      tpStrokeW.addEventListener('input', () => withText(t => t.strokeWidth(+tpStrokeW.value || 0)));
+      document.querySelectorAll('.tp-align').forEach(b => b.addEventListener('click', () => {
+        withText(t => t.align(b.dataset.align));
+        document.querySelectorAll('.tp-align').forEach(x => x.classList.toggle('tool-active', x === b));
+      }));
+      document.getElementById('tp-delete').addEventListener('click', deleteSelected);
+      function deleteSelected() { if (selected) { selected.destroy(); selectNode(null); textLayer.batchDraw(); } }
+
+      // ---------- OCR: crop the selected box and read the source text ----------
+      const ocrBtn = document.getElementById('tp-ocr');
+      async function runOcr() {
+        if (!selected) return;
+        if (location.protocol === 'file:') {
+          alert('OCR needs the editor served by the backend.\nOpen http://127.0.0.1:8001/editor (not the local file).');
+          return;
+        }
+        const page = pages.find(p => p.id === activePageId);
+        if (!page) return;
+
+        // Axis-aligned region of the box, in image pixels
+        const box = selected.getClientRect({ relativeTo: textLayer });
+        const sx = Math.max(0, Math.round(box.x)), sy = Math.max(0, Math.round(box.y));
+        const sw = Math.min(imgW - sx, Math.round(box.width)), sh = Math.min(imgH - sy, Math.round(box.height));
+        if (sw < 4 || sh < 4) return;
+
+        const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+        cv.getContext('2d').drawImage(page.imgObj, sx, sy, sw, sh, 0, 0, sw, sh);
+        const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+
+        const provider = document.getElementById('tp-provider').value;
+        const romajiEl = document.getElementById('tp-romaji');
+        const label = ocrBtn.textContent; ocrBtn.disabled = true; ocrBtn.textContent = 'Reading…';
+        try {
+          const fd = new FormData();
+          fd.append('image', blob, 'crop.png');
+          if (provider === 'gemini') {
+            fd.append('target_lang', 'English');
+            const res = await fetch('editor/gemini_ocr', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.error) { alert('Gemini error:\n' + data.error); return; }
+            if (data.source) { tpSource.value = data.source; withText(t => t.setAttr('source', data.source)); }
+            romajiEl.textContent = data.romaji ? ('romaji: ' + data.romaji) : '';
+            withText(t => t.setAttr('romaji', data.romaji || ''));
+            if (data.translation) { tpText.value = data.translation; withText(t => t.text(data.translation)); }
+            if (!data.source && !data.translation) alert('Gemini found no text in this box.');
+          } else {
+            fd.append('config', JSON.stringify({ translator: { translator: 'none' } }));
+            const res = await fetch('translate/with-form/ocr', { method: 'POST', body: fd });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            if (data.error) { alert('OCR error:\n' + data.error + '\n\n' + (data.trace || '')); return; }
+            const parts = (data.regions || []).map(r => (r.text || '').trim()).filter(Boolean);
+            const ocr = parts.join('\n').trim();
+            romajiEl.textContent = '';
+            if (ocr) { tpSource.value = ocr; withText(t => t.setAttr('source', ocr)); }
+            else alert('No text detected in this box.');
+          }
+        } catch (err) {
+          alert('OCR failed: ' + err.message + '\nMake sure the server is running.');
+        } finally {
+          ocrBtn.disabled = false; ocrBtn.textContent = label;
+        }
+      }
+      ocrBtn.addEventListener('click', runOcr);
+
+      // ---------- Inpaint: clean + redraw a region via the ML inpainter ----------
+      async function inpaintRegion(x, y, w, h) {
+        if (location.protocol === 'file:') {
+          alert('Clean/inpaint needs the editor served by the backend.\nOpen http://127.0.0.1:8001/editor (not the local file).');
+          return;
+        }
+        const page = pages.find(p => p.id === activePageId);
+        if (!page) return;
+        const sx = Math.max(0, Math.round(x)), sy = Math.max(0, Math.round(y));
+        const sw = Math.min(imgW - sx, Math.round(w)), sh = Math.min(imgH - sy, Math.round(h));
+        if (sw < 4 || sh < 4) return;
+
+        const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+        cv.getContext('2d').drawImage(page.imgObj, sx, sy, sw, sh, 0, 0, sw, sh);
+        const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+
+        hintEl.textContent = 'Cleaning…'; stageWrap.style.cursor = 'wait';
+        try {
+          const fd = new FormData();
+          fd.append('image', blob, 'crop.png');
+          // translator "none" => detect + inpaint, no text drawn => a clean patch
+          fd.append('config', JSON.stringify({ translator: { translator: 'none' } }));
+          const res = await fetch('translate/with-form/image', { method: 'POST', body: fd });
+          if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error('HTTP ' + res.status + ' ' + t.slice(0, 160)); }
+          const outUrl = URL.createObjectURL(await res.blob());
+          const cleaned = new Image();
+          cleaned.onload = () => {
+            const patch = new Konva.Image({ image: cleaned, x: sx, y: sy, width: sw, height: sh, name: 'cleanpatch' });
+            cleanLayer.add(patch); cleanLayer.batchDraw();
+            URL.revokeObjectURL(outUrl);
+          };
+          cleaned.src = outUrl;
+        } catch (err) {
+          alert('Inpaint failed: ' + err.message + '\nMake sure the server is running.');
+        } finally {
+          hintEl.textContent = ''; stageWrap.style.cursor = 'default';
+        }
+      }
+
+      // ---------- Auto-translate whole page (hybrid: local detect + Gemini) ----------
+      async function autoTranslatePage() {
+        if (!imgW) return;
+        if (location.protocol === 'file:') {
+          alert('Auto-translate needs the editor served by the backend.\nOpen http://127.0.0.1:8001/editor (not the local file).');
+          return;
+        }
+        const page = pages.find(p => p.id === activePageId);
+        if (!page) return;
+        const btn = document.getElementById('btn-autotl');
+        const label = btn.textContent; btn.disabled = true;
+        try {
+          // 1) full-page image
+          btn.textContent = 'Detecting…';
+          const cv = document.createElement('canvas'); cv.width = imgW; cv.height = imgH;
+          cv.getContext('2d').drawImage(page.imgObj, 0, 0);
+          const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+
+          // 2) local detect + OCR -> accurate boxes + Japanese text
+          const fd = new FormData();
+          fd.append('image', blob, 'page.png');
+          fd.append('config', JSON.stringify({ translator: { translator: 'none' } }));
+          fd.append('include_cleaned', 'true');
+          const r1 = await fetch('translate/with-form/ocr', { method: 'POST', body: fd });
+          const d1 = await r1.json();
+          if (d1.error) { alert('Detection failed:\n' + d1.error); return; }
+          const regions = (d1.regions || []).filter(rg => (rg.text || '').trim());
+          if (!regions.length) { alert('No text detected on this page.'); return; }
+
+          // clean the whole page (remove original Japanese) so translations don't overlap
+          if (d1.cleaned) {
+            await new Promise(res => {
+              const ci = new Image();
+              ci.onload = () => {
+                cleanLayer.add(new Konva.Image({ image: ci, x: 0, y: 0, width: imgW, height: imgH, name: 'cleanpatch' }));
+                cleanLayer.batchDraw(); res();
+              };
+              ci.onerror = () => res();
+              ci.src = d1.cleaned;
+            });
+          }
+
+          // 3) one Gemini call translates every line (+romaji)
+          btn.textContent = 'Translating…';
+          const r2 = await fetch('editor/gemini_translate', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texts: regions.map(rg => rg.text), target_lang: 'English' }),
+          });
+          const d2 = await r2.json();
+          if (d2.error) { alert('Gemini translate failed:\n' + d2.error); return; }
+          const items = d2.items || [];
+
+          // 4) place one text box per detected region
+          selectNode(null);
+          regions.forEach((rg, i) => {
+            const it = items[i] || {};
+            createBox(rg.minX, rg.minY, Math.max(20, rg.maxX - rg.minX), Math.max(20, rg.maxY - rg.minY),
+              { source: rg.text, romaji: it.romaji, translation: it.translation, select: false });
+          });
+          textLayer.batchDraw();
+        } catch (err) {
+          alert('Auto-translate failed: ' + err.message);
+        } finally {
+          const btn2 = document.getElementById('btn-autotl');
+          btn2.disabled = false; btn2.textContent = label;
+        }
+      }
+      document.getElementById('btn-autotl').addEventListener('click', autoTranslatePage);
+
+      // ---------- Manual brush (white / black / erase) on the Clean layer ----------
+      const bpSize = document.getElementById('bp-size');
+      const bpSizeVal = document.getElementById('bp-size-val');
+      bpSize.addEventListener('input', () => { brushSize = +bpSize.value; bpSizeVal.textContent = bpSize.value; });
+      document.querySelectorAll('.bp-color').forEach(b => b.addEventListener('click', () => {
+        brushColor = b.dataset.brush;
+        document.querySelectorAll('.bp-color').forEach(x => x.classList.toggle('tool-active', x === b));
+      }));
+      // default active colour = white
+      document.querySelector('.bp-color[data-brush="white"]').classList.add('tool-active');
+
+      stage.on('mousedown touchstart', () => {
+        if (currentTool !== 'brush') return;
+        painting = true;
+        const p = stage.getRelativePointerPosition();
+        const erase = brushColor === 'erase';
+        curLine = new Konva.Line({
+          points: [p.x, p.y], stroke: erase ? '#000000' : brushColor,
+          strokeWidth: brushSize, lineCap: 'round', lineJoin: 'round',
+          name: 'brushstroke', globalCompositeOperation: erase ? 'destination-out' : 'source-over',
+        });
+        cleanLayer.add(curLine); cleanLayer.batchDraw();
+      });
+      stage.on('mousemove touchmove', () => {
+        if (!painting || !curLine) return;
+        const p = stage.getRelativePointerPosition();
+        curLine.points(curLine.points().concat([p.x, p.y]));
+        cleanLayer.batchDraw();
+      });
+      stage.on('mouseup touchend', () => { painting = false; curLine = null; });
+
+      // Circular brush cursor that tracks size + zoom
+      stageWrap.addEventListener('mousemove', (e) => {
+        if (currentTool !== 'brush') return;
+        brushCursor.classList.remove('hidden');
+        const rect = stageWrap.getBoundingClientRect();
+        const d = Math.max(4, brushSize * stage.scaleX());
+        brushCursor.style.width = d + 'px';
+        brushCursor.style.height = d + 'px';
+        brushCursor.style.left = (e.clientX - rect.left - d / 2) + 'px';
+        brushCursor.style.top = (e.clientY - rect.top - d / 2) + 'px';
+      });
+      stageWrap.addEventListener('mouseleave', () => brushCursor.classList.add('hidden'));
+
+      // ---------- Wheel zoom ----------
+      const SCALE_BY = 1.08;
+      stage.on('wheel', (e) => {
+        e.evt.preventDefault(); if (!imgW) return;
+        const oldScale = stage.scaleX(), pointer = stage.getPointerPosition();
+        const to = { x: (pointer.x - stage.x()) / oldScale, y: (pointer.y - stage.y()) / oldScale };
+        const dir = e.evt.deltaY > 0 ? -1 : 1;
+        let ns = dir > 0 ? oldScale * SCALE_BY : oldScale / SCALE_BY;
+        ns = Math.max(fitScale, Math.min(ns, 20));
+        stage.scale({ x: ns, y: ns });
+        stage.position(clampPos({ x: pointer.x - to.x * ns, y: pointer.y - to.y * ns }));
+        stage.batchDraw(); updateZoomLabel(ns);
+      });
+
+      // ---------- Layers ----------
+      function bindLayerToggle(id, layer) { document.getElementById(id).addEventListener('change', (e) => { layer.visible(e.target.checked); layer.batchDraw(); }); }
+      bindLayerToggle('layer-base', baseLayer); bindLayerToggle('layer-clean', cleanLayer); bindLayerToggle('layer-text', textLayer);
+
+      // ---------- Export ----------
+      function exportPng() {
+        if (!imgW) return;
+        const keep = selected; tr.nodes([]);
+        const rects = textLayer.find('.boxrect'); rects.forEach(r => r.visible(false)); // hide box outlines in output
+        const prev = { scale: stage.scaleX(), pos: stage.position(), w: stage.width(), h: stage.height() };
+        stage.draggable(false);
+        stage.scale({ x: 1, y: 1 }); stage.position({ x: 0, y: 0 }); stage.size({ width: imgW, height: imgH }); stage.draw();
+        const uri = stage.toDataURL({ pixelRatio: 1, mimeType: 'image/png' });
+        stage.size({ width: prev.w, height: prev.h }); stage.scale({ x: prev.scale, y: prev.scale }); stage.position(prev.pos);
+        rects.forEach(r => r.visible(true));
+        stage.draggable(currentTool === 'select'); if (keep) tr.nodes([keep]); stage.draw();
+        const page = pages.find(p => p.id === activePageId), base = page ? page.name.replace(/\.[^.]+$/, '') : 'page';
+        const a = document.createElement('a'); a.download = base + '_translated.png'; a.href = uri; a.click();
+      }
+
+      // ---------- Toolbar / input ----------
+      document.getElementById('btn-open').addEventListener('click', () => fileInput.click());
+      document.getElementById('btn-fit').addEventListener('click', fitToScreen);
+      document.getElementById('btn-100').addEventListener('click', () => zoomTo(1));
+      btnExport.addEventListener('click', exportPng);
+      fileInput.addEventListener('change', (e) => { if (e.target.files && e.target.files.length) addFiles(e.target.files); fileInput.value = ''; });
+
+      window.addEventListener('keydown', (e) => {
+        const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName);
+        if (e.key === 'Escape') { cancelPlacing(); return; }
+        if (typing) return;
+        if (e.key === 'v' || e.key === 'V') { cancelPlacing(); setTool('select'); }
+        else if (e.key === 't' || e.key === 'T') setTool('text');
+        else if (e.key === 'c' || e.key === 'C') setTool('inpaint');
+        else if (e.key === 'b' || e.key === 'B') setTool('brush');
+        else if (e.key === 'Delete' || e.key === 'Backspace') { if (selected) { e.preventDefault(); deleteSelected(); } }
+      });
+
+      ['dragenter', 'dragover'].forEach(ev => stageWrap.addEventListener(ev, (e) => { e.preventDefault(); dragOv.classList.remove('hidden'); dragOv.classList.add('flex'); }));
+      ['dragleave', 'drop'].forEach(ev => stageWrap.addEventListener(ev, (e) => { e.preventDefault(); dragOv.classList.add('hidden'); dragOv.classList.remove('flex'); }));
+      stageWrap.addEventListener('drop', (e) => { if (e.dataTransfer.files && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+      window.addEventListener('resize', () => {
+        stage.size({ width: stageWrap.clientWidth, height: stageWrap.clientHeight });
+        if (imgW) { computeFitScale(); if (stage.scaleX() < fitScale) zoomTo(fitScale); else stage.position(clampPos(stage.position())); }
+        stage.batchDraw();
+      });
+
+      if (document.fonts && document.fonts.load) {
+        Promise.all([document.fonts.load('24px "Anime Ace"'), document.fonts.load('24px "Anime Ace 3"'), document.fonts.load('24px "Comic Shanns"')])
+          .then(() => textLayer.batchDraw()).catch(() => {});
+      }
+
+      setTool('select'); updateZoomLabel(1); renderPageList();
+    })();
+  </script>
+</body>
+</html>
