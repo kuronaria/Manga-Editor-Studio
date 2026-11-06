@@ -22,7 +22,7 @@ class TranslatorChain:
         self.target_lang = None
         for g in string.split(';'):
             trans, lang = g.split(':')
-            translator = Translator[trans]
+            translator = Translator(trans)
             if translator not in TRANSLATORS:
                 raise ValueError(f'Invalid choice: %s (choose from %s)' % (trans, ', '.join(map(repr, TRANSLATORS))))
             if lang not in VALID_LANGUAGES:
@@ -122,6 +122,7 @@ class Translator(str, Enum):
     groq = "groq"
     gemini = "gemini"
     gemini_2stage = "gemini_2stage"
+    atlascloud = "atlascloud"
     custom_openai = "custom_openai"
     offline = "offline"
     nllb = "nllb"
@@ -131,6 +132,8 @@ class Translator(str, Enum):
     jparacrawl_big = "jparacrawl_big"
     m2m100 = "m2m100"
     m2m100_big = "m2m100_big"
+    m2m100_hf = "m2m100_hf"
+    m2m100_hf_big = "m2m100_hf_big"
     mbart50 = "mbart50"
     qwen2 = "qwen2"
     qwen2_big = "qwen2_big"
@@ -138,10 +141,10 @@ class Translator(str, Enum):
     def __str__(self):
         return self.name
 
-    # Map 'openai' and any translator starting with 'gpt'* to 'chatgpt'
+    # Supported aliases for the single-model ChatGPT translator.
     @classmethod
     def _missing_(cls, value):
-        if value.startswith('gpt') or value == 'openai':
+        if value in ('gpt-6-luna', 'openai'):
             return cls.chatgpt
         raise ValueError(f"{value} is not a valid {cls.__name__}")
 
