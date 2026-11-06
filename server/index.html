@@ -605,7 +605,7 @@
                  class="group cursor-pointer bg-white rounded-lg border hover:border-blue-400 hover:shadow-md transition-all duration-200"
                  @click="openImageModal(image)">
               <div class="relative aspect-square overflow-hidden rounded-t-lg">
-                <img v-if="image.result"
+                <img v-if="validSrc(image.result)"
                      :src="image.result"
                      :alt="'Translated: ' + image.originalName"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200">
@@ -672,12 +672,12 @@
           </button>
           
           <!-- Image -->
-          <img v-if="selectedImage && selectedImage.result"
+          <img v-if="selectedImage && validSrc(selectedImage.result)"
                :src="selectedImage.result"
                :alt="'Translated: ' + selectedImage.originalName"
                draggable="false"
                class="max-w-full max-h-full object-contain rounded-lg select-none"
-               :class="{ 'transition-transform duration-200': !isDragging, 'cursor-grabbing': isDragging, 'cursor-grab': !isDragging && imageTransform.scale > 1, 'cursor-zoom-in': !isDragging && imageTransform.scale <= 1 }"
+               :class="{ 'transition-transform duration-200': !isDragging, 'cursor-grabbing': isDragging, 'cursor-grab': !isDragging }"
                :style="{
                  transform: `translate(${imageTransform.translateX}px, ${imageTransform.translateY}px) scale(${imageTransform.scale})`,
                  transformOrigin: 'center center'
@@ -1064,11 +1064,21 @@
         },
 
         // Gallery management
+        // True only for a usable image URL. Rejects null/undefined and the
+        // literal strings "undefined"/"null" that can leak in from old data
+        // and cause GET /undefined or GET /null 404s.
+        validSrc(u) {
+          return typeof u === 'string' && u.length > 0 && u !== 'undefined' && u !== 'null';
+        },
+
         loadFinishedImages() {
           try {
             const saved = localStorage.getItem('manga-translator-finished-images');
             if (saved) {
-              this.finishedImages = JSON.parse(saved);
+              const parsed = JSON.parse(saved);
+              this.finishedImages = Array.isArray(parsed)
+                ? parsed.filter(img => img && this.validSrc(img.result))
+                : [];
             }
           } catch (error) {
             console.warn('Failed to load finished images:', error);
@@ -1673,10 +1683,9 @@
       this.isImageZoomed = true;
     },
 
-    // Left-drag to pan while zoomed in
+    // Left-drag to pan (works at any zoom level)
     onImageMouseDown(event) {
       if (event.button !== 0) return;             // left button only
-      if (this.imageTransform.scale <= 1) return; // nothing to pan when fit
       event.preventDefault();
       this.isDragging = true;
       this.dragStart = { x: event.clientX, y: event.clientY };

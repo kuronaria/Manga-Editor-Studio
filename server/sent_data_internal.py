@@ -28,10 +28,14 @@ async def fetch_data(url, image: Image, config: Config, headers: Mapping[str, st
     async with aiohttp.ClientSession() as session:
         async with session.post(url, data=data, headers=headers) as response:
             if response.status == 200:
+                # The internal instance replies with a pickled result object
+                # (Response media_type="application/octet-stream" in share.py),
+                # NOT JSON. Decoding it as text broke every non-streaming
+                # endpoint with "utf-8 codec can't decode byte 0x80".
                 try:
-                    return json.loads(await response.text())
-                except json.JSONDecodeError:
-                    raise HTTPException(502, detail='Invalid JSON response from upstream')
+                    return pickle.loads(await response.read())
+                except pickle.UnpicklingError:
+                    raise HTTPException(502, detail='Invalid (non-pickle) response from upstream')
             else:
                 raise HTTPException(response.status, detail=await response.text())
 

@@ -138,6 +138,7 @@ async def ocr_form(req: Request, image: UploadFile = File(...), config: str = Fo
                 regions.append({
                     "minX": minX, "minY": minY, "maxX": maxX, "maxY": maxY,
                     "text": getattr(blk, "text", "") or "",
+                    "translation": getattr(blk, "translation", "") or "",
                 })
             except Exception:
                 continue
@@ -158,14 +159,134 @@ async def ocr_form(req: Request, image: UploadFile = File(...), config: str = Fo
         print("[OCR endpoint error]\n" + _tb.format_exc())
         return {"error": str(e), "trace": _tb.format_exc()[-1800:], "regions": []}
 
+def _glossary_preamble(glossary, keep_honorifics):
+    """Build a prompt preamble that fixes term translations (names/skills/terms)
+    and optionally preserves Japanese honorifics, so the LLM stays consistent."""
+    parts, pairs = [], []
+    for item in (glossary or []):
+        o = t = ""
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            o, t = str(item[0]).strip(), str(item[1]).strip()
+        elif isinstance(item, dict):
+            o, t = str(item.get("original", "")).strip(), str(item.get("target", "")).strip()
+        if o and t:
+            pairs.append(f"{o} => {t}")
+    if pairs:
+        parts.append("Always use these fixed term translations exactly, unchanged: " + "; ".join(pairs) + ".")
+    if str(keep_honorifics).lower() in ("1", "true", "yes", "on"):
+        parts.append("Keep Japanese honorifics as romaji suffixes (e.g. -san, -kun, -chan, "
+                     "-sama, -dono, nii-san, nee-san) instead of translating or dropping them.")
+    return (" ".join(parts) + "\n\n") if parts else ""
+
+def _loose_json(raw):
+    """Parse JSON that may be wrapped in ```json fences."""
+    import json as _json
+    raw = (raw or "").strip()
+    try:
+        return _json.loads(raw)
+    except Exception:
+        s = raw.strip("`").strip()
+        if s[:4].lower() == "json":
+            s = s[4:].strip()
+        return _json.loads(s)
+
+@app.post("/editor/proxy_ocr", tags=["editor"],
+          response_description="OpenAI-compatible proxy: OCR + romaji + translation for one crop")
+async def proxy_ocr(image: UploadFile = File(...), target_lang: str = Form("English"),
+                    glossary: str = Form(""), keep_honorifics: str = Form("false"),
+                    base_url: str = Form(""), api_key: str = Form(""), model: str = Form("")):
+    """Vision OCR+TL via a user-supplied OpenAI-compatible endpoint (base_url /
+    api_key / model come from the editor's Proxy settings, not .env)."""
+    import traceback as _tb, json as _json, base64 as _b64
+    try:
+        if not api_key or not model:
+            return {"error": "Proxy not configured. Set API key and model in Proxy settings."}
+        try:
+            _gloss = _json.loads(glossary) if glossary else []
+        except Exception:
+            _gloss = []
+        img = await image.read()
+        b64 = _b64.b64encode(img).decode("ascii")
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key, base_url=(base_url or None))
+        prompt = _glossary_preamble(_gloss, keep_honorifics) + (
+            "This image is a cropped region from a Japanese manga page. Read ALL Japanese "
+            "text exactly as written (including small, vertical, or stylized text). Then give "
+            f"its romaji and a natural {target_lang} translation. Respond ONLY with JSON: "
+            '{"source":"...","romaji":"...","translation":"..."}. Use empty strings if no text.')
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ]}],
+            response_format={"type": "json_object"},
+        )
+        data = _loose_json(resp.choices[0].message.content)
+        return {"source": (data.get("source") or "").strip(),
+                "romaji": (data.get("romaji") or "").strip(),
+                "translation": (data.get("translation") or "").strip()}
+    except Exception as e:
+        print("[proxy_ocr error]\n" + _tb.format_exc())
+        return {"error": str(e)}
+
+@app.post("/editor/proxy_translate", tags=["editor"],
+          response_description="OpenAI-compatible proxy: batch translate a page's lines")
+async def proxy_translate(req: Request):
+    import traceback as _tb
+    try:
+        body = await req.json()
+        texts = body.get("texts") or []
+        if not texts:
+            return {"items": []}
+        target_lang = body.get("target_lang") or "English"
+        glossary = body.get("glossary") or []
+        keep_honorifics = body.get("keep_honorifics") or False
+        base_url = body.get("base_url") or ""
+        api_key = body.get("api_key") or ""
+        model = body.get("model") or ""
+        if not api_key or not model:
+            return {"error": "Proxy not configured. Set API key and model in Proxy settings."}
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=api_key, base_url=(base_url or None))
+        numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+        prompt = _glossary_preamble(glossary, keep_honorifics) + (
+            "These are Japanese text lines from one manga page (each line a separate bubble "
+            f"or caption). Translate each into natural {target_lang}, keeping the SAME order "
+            "and count. For each line also give its romaji. Respond ONLY with a JSON object: "
+            '{"items":[{"romaji":"...","translation":"..."}, ...]} with exactly one item per '
+            "input line.\n\n" + numbered)
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        data = _loose_json(resp.choices[0].message.content)
+        arr = data.get("items") if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        arr = arr or []
+        items = []
+        for i in range(len(texts)):
+            it = arr[i] if i < len(arr) and isinstance(arr[i], dict) else {}
+            items.append({"romaji": (it.get("romaji") or "").strip(),
+                          "translation": (it.get("translation") or "").strip()})
+        return {"items": items}
+    except Exception as e:
+        print("[proxy_translate error]\n" + _tb.format_exc())
+        return {"error": str(e)}
+
 @app.post("/editor/gemini_ocr", tags=["editor"],
           response_description="Gemini vision: OCR + romaji + translation for one crop")
-async def gemini_ocr(image: UploadFile = File(...), target_lang: str = Form("English")):
+async def gemini_ocr(image: UploadFile = File(...), target_lang: str = Form("English"),
+                     glossary: str = Form(""), keep_honorifics: str = Form("false")):
     """Sends one image crop to Gemini and gets back the Japanese text, its
     romaji, and a translation in a single call. Uses GEMINI_API_KEY / GEMINI_MODEL
     from .env (same plumbing as the gemini translator). Key stays server-side."""
     import traceback as _tb, json as _json
     try:
+        try:
+            _gloss = _json.loads(glossary) if glossary else []
+        except Exception:
+            _gloss = []
         from google import genai
         from google.genai import types
         from manga_translator.translators.keys import GEMINI_API_KEY, GEMINI_MODEL
@@ -176,7 +297,7 @@ async def gemini_ocr(image: UploadFile = File(...), target_lang: str = Form("Eng
 
         img = await image.read()
         client = genai.Client(api_key=GEMINI_API_KEY)
-        prompt = (
+        prompt = _glossary_preamble(_gloss, keep_honorifics) + (
             "This image is a cropped region from a Japanese manga page. "
             "Read ALL Japanese text in it exactly as written, including small, "
             "vertical, or stylized text. Then provide its romaji and a natural "
@@ -221,6 +342,8 @@ async def gemini_translate(req: Request):
         body = await req.json()
         texts = body.get("texts") or []
         target_lang = body.get("target_lang") or "English"
+        glossary = body.get("glossary") or []
+        keep_honorifics = body.get("keep_honorifics") or False
         if not texts:
             return {"items": []}
         from google import genai
@@ -233,7 +356,7 @@ async def gemini_translate(req: Request):
 
         client = genai.Client(api_key=GEMINI_API_KEY)
         numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
-        prompt = (
+        prompt = _glossary_preamble(glossary, keep_honorifics) + (
             "These are Japanese text lines from one manga page (each line is a "
             "separate speech bubble or caption). Translate each into natural "
             f"{target_lang}. Keep the SAME order and the SAME number of items. "

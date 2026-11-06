@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Manga Studio — Editor</title>
+  <title>Echoes — Manga Studio Editor</title>
   <link rel="icon" type="image/png" href="https://avatars.githubusercontent.com/u/17797982?s=48&v=4">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/konva@9/konva.min.js"></script>
@@ -23,6 +23,22 @@
       background-position: 0 0, 0 12px, 12px -12px, -12px 0;
     }
     .tool-active { background:#2563eb !important; }
+    header button { white-space: nowrap; }
+    .tool-btn { display:inline-flex; align-items:center; gap:5px; }
+    .tool-btn svg { width:14px; height:14px; flex:none; }
+    #hint:empty { display: none; }
+    /* Glossary input cells — real CSS so dynamically added rows all style the same
+       (Tailwind CDN doesn't reliably generate utilities for JS-created elements) */
+    .gl-cell { width:100%; background:#111827; border:1px solid #4b5563; border-radius:4px;
+               color:#f3f4f6; padding:4px 8px; font-size:13px; outline:none; box-sizing:border-box; }
+    .gl-cell:focus { border-color:#3b82f6; }
+    .gl-cell::placeholder { color:#6b7280; }
+    .gl-del { width:26px; height:26px; border-radius:4px; background:#374151; color:#f87171;
+              font-size:16px; line-height:1; border:none; cursor:pointer; }
+    .gl-del:hover { background:#4b5563; }
+    .pg-del { width:20px; height:20px; border-radius:4px; background:transparent; color:#9ca3af;
+              font-size:15px; line-height:1; border:none; cursor:pointer; flex-shrink:0; }
+    .pg-del:hover { background:#4b5563; color:#f87171; }
   </style>
 </head>
 <body class="h-full bg-gray-900 text-gray-100 overflow-hidden">
@@ -30,21 +46,24 @@
 
     <!-- Top toolbar -->
     <header class="flex items-center gap-2 px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
-      <span class="font-semibold text-sm mr-2">Manga Studio · Editor</span>
+      <span class="mr-2 flex flex-col leading-tight">
+        <span class="font-semibold text-base">Echoes</span>
+        <span class="text-[10px] text-gray-400">Manga Studio Editor</span>
+      </span>
       <button id="btn-open"   class="px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-700">Open image(s)</button>
       <span class="w-px h-5 bg-gray-600 mx-1"></span>
-      <button id="tool-select" class="tool-active px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Select / pan (V)">Select</button>
-      <button id="tool-text"   class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Draw box: click a corner, then the opposite corner (T)">▭ Text</button>
-      <button id="tool-inpaint" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Clean/redraw a region via inpainting (C)">▧ Clean</button>
-      <button id="tool-brush" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Manual brush: white / black / erase (B)">✎ Brush</button>
+      <button id="tool-select" class="tool-btn tool-active px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Select / pan (V)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/></svg>Select</button>
+      <button id="tool-text"   class="tool-btn px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Draw box: click a corner, then the opposite corner (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></svg>Text</button>
+      <button id="tool-inpaint" class="tool-btn px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Clean/redraw a region via inpainting (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>Clean</button>
+      <button id="tool-brush" class="tool-btn px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Manual brush: white / black / erase (B)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/></svg>Brush</button>
       <span class="w-px h-5 bg-gray-600 mx-1"></span>
       <button id="btn-fit"    class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">Fit</button>
       <button id="btn-100"    class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600">100%</button>
+      <button id="btn-glossary" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Glossary: fixed term translations (names/skills/terms)">Glossary</button>
+      <button id="btn-proxy" class="px-3 py-1.5 text-sm rounded bg-gray-700 hover:bg-gray-600" title="Proxy / LLM connection (base URL + API key + model)">Proxy</button>
       <button id="btn-autotl" class="px-3 py-1.5 text-sm rounded bg-purple-600 hover:bg-purple-700 disabled:opacity-40" disabled title="Auto-translate whole page: local detect + Gemini">Auto-TL</button>
       <button id="btn-export" class="px-3 py-1.5 text-sm rounded bg-green-600 hover:bg-green-700 disabled:opacity-40" disabled>Export PNG</button>
-      <div class="ml-auto text-xs text-gray-400">
-        <span id="hint" class="text-blue-300"></span>
-        <span class="mx-2">·</span>
+      <div class="ml-auto text-xs text-gray-400 whitespace-nowrap">
         <span id="img-size">—</span>
         <span class="mx-2">·</span>
         <span id="zoom-label">100%</span>
@@ -78,6 +97,9 @@
 
         <!-- Brush size cursor (follows mouse in Brush tool) -->
         <div id="brush-cursor" class="hidden absolute rounded-full border-2 border-white pointer-events-none" style="mix-blend-mode: difference;"></div>
+
+        <!-- Transient hint (shows only while it has text) -->
+        <div id="hint" class="absolute top-3 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1 rounded-full pointer-events-none z-20 shadow"></div>
       </div>
 
       <!-- Right sidebar -->
@@ -90,8 +112,9 @@
           <div id="tp-romaji" class="text-[11px] text-gray-400 mb-2 min-h-[14px] italic"></div>
           <div class="flex gap-1 mb-3">
             <select id="tp-provider" class="text-xs rounded bg-gray-900 border border-gray-600 px-1.5">
-              <option value="local">Local (manga-ocr)</option>
-              <option value="gemini">Gemini (cloud)</option>
+              <option value="local">Local: OCR only</option>
+              <option value="local_mtl">Local: OCR + rough MTL</option>
+              <option value="proxy">Proxy: OCR + TL</option>
             </select>
             <button id="tp-ocr" class="flex-1 text-xs rounded bg-indigo-600 hover:bg-indigo-700 py-1.5">Read (OCR)</button>
           </div>
@@ -166,6 +189,80 @@
     </div>
   </div>
 
+  <!-- Glossary modal -->
+  <div id="glossary-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+    <div class="bg-gray-800 border border-gray-600 rounded-lg w-[480px] max-h-[80vh] flex flex-col shadow-xl">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <h2 class="text-sm font-semibold">Glossary</h2>
+        <button id="gl-close" class="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-4 py-2 border-b border-gray-700">
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" id="gl-honorifics" class="accent-blue-500">
+          Keep honorifics (-san, -kun, -chan, -sama, -dono, nii-san, nee-san…)
+        </label>
+      </div>
+      <div class="flex-1 overflow-y-auto px-4 py-2">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px" class="text-[11px] text-gray-400 mb-1 px-1">
+          <span>Original (JP)</span><span>Target</span><span style="width:26px"></span>
+        </div>
+        <div id="gl-rows" class="space-y-1"></div>
+        <button id="gl-add" class="mt-2 text-xs rounded bg-gray-700 hover:bg-gray-600 px-3 py-1.5">+ Add row</button>
+      </div>
+      <div class="flex items-center gap-2 px-4 py-3 border-t border-gray-700">
+        <button id="gl-import" class="text-xs rounded bg-gray-700 hover:bg-gray-600 px-3 py-1.5">Import CSV</button>
+        <button id="gl-export" class="text-xs rounded bg-gray-700 hover:bg-gray-600 px-3 py-1.5">Export CSV</button>
+        <button id="gl-done" class="ml-auto text-xs rounded bg-blue-600 hover:bg-blue-700 px-4 py-1.5">Done</button>
+        <input id="gl-file" type="file" accept=".csv,text/csv,text/plain" class="hidden">
+      </div>
+    </div>
+  </div>
+
+  <!-- Proxy / LLM modal -->
+  <div id="proxy-modal" class="hidden fixed inset-0 z-50 bg-black/60 flex items-center justify-center">
+    <div class="bg-gray-800 border border-gray-600 rounded-lg w-[440px] flex flex-col shadow-xl">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+        <h2 class="text-sm font-semibold">Proxy / LLM connection</h2>
+        <button id="px-close" class="text-gray-400 hover:text-white text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-4 py-3 space-y-3">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-[11px] text-gray-400">Base URL (OpenAI-compatible)</label>
+            <select id="px-preset" class="text-[11px] rounded bg-gray-900 border border-gray-600 px-1 py-0.5">
+              <option value="">preset…</option>
+              <option value="https://api.openai.com/v1">OpenAI</option>
+              <option value="https://openrouter.ai/api/v1">OpenRouter</option>
+              <option value="https://generativelanguage.googleapis.com/v1beta/openai/">Gemini</option>
+              <option value="https://api.deepseek.com/v1">DeepSeek</option>
+              <option value="https://api.anthropic.com/v1/">Anthropic</option>
+              <option value="https://open.bigmodel.cn/api/paas/v4">GLM (BigModel)</option>
+              <option value="https://api.z.ai/api/paas/v4">GLM (z.ai)</option>
+            </select>
+          </div>
+          <input id="px-base" type="text" class="gl-cell" placeholder="https://openrouter.ai/api/v1">
+        </div>
+        <div>
+          <label class="block text-[11px] text-gray-400 mb-1">API key</label>
+          <input id="px-key" type="password" class="gl-cell" placeholder="sk-… / your key">
+        </div>
+        <div>
+          <label class="block text-[11px] text-gray-400 mb-1">Model</label>
+          <input id="px-model" type="text" class="gl-cell" placeholder="e.g. google/gemini-2.5-flash">
+        </div>
+        <p class="text-[11px] text-gray-500 leading-relaxed">
+          Kept only for this browser tab (temporary). Used for “Proxy: OCR + TL” and Auto-TL.
+          Any OpenAI-compatible endpoint works (OpenRouter, a local proxy, Gemini's OpenAI-compatible URL, …).
+        </p>
+      </div>
+      <div class="flex items-center gap-2 px-4 py-3 border-t border-gray-700">
+        <button id="px-clear" class="text-xs rounded bg-gray-700 hover:bg-gray-600 px-3 py-1.5">Clear</button>
+        <span id="px-status" class="text-[11px] text-gray-500"></span>
+        <button id="px-save" class="ml-auto text-xs rounded bg-blue-600 hover:bg-blue-700 px-4 py-1.5">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     (function () {
       const stageWrap  = document.getElementById('stage-wrap');
@@ -228,7 +325,7 @@
         files.forEach(file => {
           const id = Date.now() + '-' + Math.random().toString(36).slice(2, 7);
           const url = URL.createObjectURL(file), imgObj = new Image();
-          const page = { id, name: file.name, url, imgObj, w: 0, h: 0, ready: false };
+          const page = { id, name: file.name, url, imgObj, w: 0, h: 0, ready: false, textNodes: [], cleanNodes: [] };
           imgObj.onload = () => { page.w = imgObj.naturalWidth; page.h = imgObj.naturalHeight; page.ready = true; renderPageList(); if (activePageId === id) switchPage(id); };
           imgObj.src = url; pages.push(page); if (!firstNew) firstNew = id;
         });
@@ -236,26 +333,73 @@
       }
       function switchPage(id) {
         const page = pages.find(p => p.id === id); if (!page) return;
+        const switching = (activePageId !== id);
+        // Leaving a different page: stash its boxes + clean onto that page
+        if (switching && activePageId) {
+          const cur = pages.find(p => p.id === activePageId);
+          if (cur) {
+            selectNode(null);
+            cur.textNodes = textLayer.getChildren().filter(n => n.name && n.name() === 'tbox');
+            cur.cleanNodes = cleanLayer.getChildren().slice();
+            cur.textNodes.forEach(n => n.remove());
+            cur.cleanNodes.forEach(n => n.remove());
+          }
+        }
         activePageId = id; if (!page.ready) { renderPageList(); return; }
         imgW = page.w; imgH = page.h;
         if (baseImage) baseImage.destroy();
         baseImage = new Konva.Image({ image: page.imgObj, x: 0, y: 0, width: imgW, height: imgH });
         baseLayer.add(baseImage); baseLayer.batchDraw();
+        // Entering: restore this page's own boxes + clean
+        if (switching) {
+          (page.textNodes || []).forEach(n => textLayer.add(n));
+          (page.cleanNodes || []).forEach(n => cleanLayer.add(n));
+          page.textNodes = []; page.cleanNodes = [];
+          textLayer.batchDraw(); cleanLayer.batchDraw();
+        }
         dropHint.style.display = 'none'; btnExport.disabled = false;
         document.getElementById('btn-autotl').disabled = false;
         imgSizeEl.textContent = imgW + ' × ' + imgH + ' px';
         fitToScreen(); renderPageList();
+      }
+
+      function removePage(id) {
+        const idx = pages.findIndex(p => p.id === id); if (idx === -1) return;
+        const p = pages[idx], wasActive = (id === activePageId);
+        pages.splice(idx, 1);
+        try { URL.revokeObjectURL(p.url); } catch (e) {}
+        (p.textNodes || []).forEach(n => n.destroy());
+        (p.cleanNodes || []).forEach(n => n.destroy());
+        if (wasActive) {
+          selectNode(null);
+          textLayer.getChildren().filter(n => n.name && n.name() === 'tbox').forEach(n => n.destroy());
+          cleanLayer.destroyChildren();
+          if (baseImage) { baseImage.destroy(); baseImage = null; }
+          baseLayer.batchDraw();
+          activePageId = null; imgW = 0; imgH = 0;
+          if (pages.length) {
+            switchPage(pages[Math.min(idx, pages.length - 1)].id);
+          } else {
+            dropHint.style.display = ''; btnExport.disabled = true;
+            document.getElementById('btn-autotl').disabled = true;
+            imgSizeEl.textContent = '—';
+            textLayer.batchDraw(); cleanLayer.batchDraw();
+          }
+        }
+        renderPageList();
       }
       function renderPageList() {
         pageListEl.innerHTML = '';
         pageEmptyEl.style.display = pages.length ? 'none' : 'block';
         pageCountEl.textContent = pages.length ? pages.length + (pages.length > 1 ? ' pages' : ' page') : '';
         pages.forEach((p, i) => {
-          const item = document.createElement('button');
-          item.className = 'w-full flex items-center gap-2 p-1 rounded text-left ' + (p.id === activePageId ? 'bg-blue-600/30 ring-1 ring-blue-500' : 'hover:bg-gray-700');
+          const item = document.createElement('div');
+          item.className = 'w-full flex items-center gap-2 p-1 rounded text-left cursor-pointer ' + (p.id === activePageId ? 'bg-blue-600/30 ring-1 ring-blue-500' : 'hover:bg-gray-700');
           const thumb = document.createElement('img'); thumb.src = p.url; thumb.className = 'w-9 h-12 object-cover rounded bg-gray-900 border border-gray-700 shrink-0';
-          const label = document.createElement('span'); label.className = 'text-xs text-gray-300 truncate'; label.textContent = (i + 1) + '. ' + p.name;
-          item.appendChild(thumb); item.appendChild(label);
+          const label = document.createElement('span'); label.className = 'text-xs text-gray-300 truncate flex-1'; label.textContent = (i + 1) + '. ' + p.name;
+          const del = document.createElement('button'); del.className = 'pg-del'; del.textContent = '×'; del.title = 'Remove page';
+          del.addEventListener('click', (e) => { e.stopPropagation(); removePage(p.id); });
+          item.appendChild(thumb); item.appendChild(label); item.appendChild(del);
           item.addEventListener('click', () => switchPage(p.id));
           pageListEl.appendChild(item);
         });
@@ -405,6 +549,8 @@
       const ocrBtn = document.getElementById('tp-ocr');
       async function runOcr() {
         if (!selected) return;
+        const target = selected;  // lock the box being OCR'd (user may click another during await)
+        const applyTarget = (fn) => { if (target.getParent()) { fn(innerText(target)); textLayer.batchDraw(); } };
         if (location.protocol === 'file:') {
           alert('OCR needs the editor served by the backend.\nOpen http://127.0.0.1:8001/editor (not the local file).');
           return;
@@ -413,7 +559,7 @@
         if (!page) return;
 
         // Axis-aligned region of the box, in image pixels
-        const box = selected.getClientRect({ relativeTo: textLayer });
+        const box = target.getClientRect({ relativeTo: textLayer });
         const sx = Math.max(0, Math.round(box.x)), sy = Math.max(0, Math.round(box.y));
         const sw = Math.min(imgW - sx, Math.round(box.width)), sh = Math.min(imgH - sy, Math.round(box.height));
         if (sw < 4 || sh < 4) return;
@@ -428,28 +574,41 @@
         try {
           const fd = new FormData();
           fd.append('image', blob, 'crop.png');
-          if (provider === 'gemini') {
+          if (provider === 'proxy') {
+            if (!proxyReady()) { alert('Proxy not set. Open the "Proxy" button and enter an API key + model.'); return; }
             fd.append('target_lang', 'English');
-            const res = await fetch('editor/gemini_ocr', { method: 'POST', body: fd });
+            fd.append('glossary', JSON.stringify(getGlossaryPairs()));
+            fd.append('keep_honorifics', glHon.checked ? 'true' : 'false');
+            fd.append('base_url', proxyCfg.base_url);
+            fd.append('api_key', proxyCfg.api_key);
+            fd.append('model', proxyCfg.model);
+            const res = await fetch('editor/proxy_ocr', { method: 'POST', body: fd });
             const data = await res.json();
-            if (data.error) { alert('Gemini error:\n' + data.error); return; }
-            if (data.source) { tpSource.value = data.source; withText(t => t.setAttr('source', data.source)); }
-            romajiEl.textContent = data.romaji ? ('romaji: ' + data.romaji) : '';
-            withText(t => t.setAttr('romaji', data.romaji || ''));
-            if (data.translation) { tpText.value = data.translation; withText(t => t.text(data.translation)); }
+            if (data.error) { alert('Proxy error:\n' + data.error); return; }
+            if (data.source) { applyTarget(t => t.setAttr('source', data.source)); if (selected === target) tpSource.value = data.source; }
+            applyTarget(t => t.setAttr('romaji', data.romaji || ''));
+            if (selected === target) romajiEl.textContent = data.romaji ? ('romaji: ' + data.romaji) : '';
+            if (data.translation) { applyTarget(t => t.text(data.translation)); if (selected === target) tpText.value = data.translation; }
             if (!data.source && !data.translation) alert('Gemini found no text in this box.');
           } else {
-            fd.append('config', JSON.stringify({ translator: { translator: 'none' } }));
+            const useMtl = provider === 'local_mtl';
+            const cfg = useMtl ? { translator: { translator: 'sugoi', target_lang: 'ENG' } }
+                               : { translator: { translator: 'none' } };
+            fd.append('config', JSON.stringify(cfg));
             const res = await fetch('translate/with-form/ocr', { method: 'POST', body: fd });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
             if (data.error) { alert('OCR error:\n' + data.error + '\n\n' + (data.trace || '')); return; }
-            const parts = (data.regions || []).map(r => (r.text || '').trim()).filter(Boolean);
-            const ocr = parts.join('\n').trim();
-            romajiEl.textContent = '';
-            if (ocr) { tpSource.value = ocr; withText(t => t.setAttr('source', ocr)); }
-            else alert('No text detected in this box.');
+            const regs = data.regions || [];
+            const ocr = regs.map(r => (r.text || '').trim()).filter(Boolean).join('\n').trim();
+            const tl = regs.map(r => (r.translation || '').trim()).filter(Boolean).join('\n').trim();
+            if (selected === target) romajiEl.textContent = '';
+            if (ocr) { applyTarget(t => t.setAttr('source', ocr)); if (selected === target) tpSource.value = ocr; }
+            if (useMtl && tl) { applyTarget(t => t.text(tl)); if (selected === target) tpText.value = tl; }
+            if (!ocr) alert('No text detected in this box.');
           }
+          // auto-clean the box region so the original Japanese is removed
+          await inpaintRegion(sx, sy, sw, sh);
         } catch (err) {
           alert('OCR failed: ' + err.message + '\nMake sure the server is running.');
         } finally {
@@ -506,6 +665,7 @@
         }
         const page = pages.find(p => p.id === activePageId);
         if (!page) return;
+        if (!proxyReady()) { alert('Proxy not set. Open the "Proxy" button and enter an API key + model.'); return; }
         const btn = document.getElementById('btn-autotl');
         const label = btn.textContent; btn.disabled = true;
         try {
@@ -541,12 +701,15 @@
 
           // 3) one Gemini call translates every line (+romaji)
           btn.textContent = 'Translating…';
-          const r2 = await fetch('editor/gemini_translate', {
+          const r2 = await fetch('editor/proxy_translate', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ texts: regions.map(rg => rg.text), target_lang: 'English' }),
+            body: JSON.stringify(Object.assign({
+              texts: regions.map(rg => rg.text), target_lang: 'English',
+              base_url: proxyCfg.base_url, api_key: proxyCfg.api_key, model: proxyCfg.model
+            }, glossaryPayload())),
           });
           const d2 = await r2.json();
-          if (d2.error) { alert('Gemini translate failed:\n' + d2.error); return; }
+          if (d2.error) { alert('Proxy translate failed:\n' + d2.error); return; }
           const items = d2.items || [];
 
           // 4) place one text box per detected region
@@ -676,6 +839,83 @@
         Promise.all([document.fonts.load('24px "Anime Ace"'), document.fonts.load('24px "Anime Ace 3"'), document.fonts.load('24px "Comic Shanns"')])
           .then(() => textLayer.batchDraw()).catch(() => {});
       }
+
+      // ---------- Glossary ----------
+      const glModal = document.getElementById('glossary-modal');
+      const glRows = document.getElementById('gl-rows');
+      const glHon = document.getElementById('gl-honorifics');
+      function addGlossaryRow(o, t) {
+        const row = document.createElement('div');
+        row.style.display = 'grid'; row.style.gridTemplateColumns = '1fr 1fr auto'; row.style.gap = '8px'; row.style.alignItems = 'center';
+        const a = document.createElement('input'); a.className = 'gl-o gl-cell'; a.value = o || ''; a.placeholder = 'ビルド';
+        const b = document.createElement('input'); b.className = 'gl-t gl-cell'; b.value = t || ''; b.placeholder = 'Build';
+        const del = document.createElement('button'); del.className = 'gl-del'; del.textContent = '×'; del.title = 'Remove row';
+        del.addEventListener('click', () => { row.remove(); if (!glRows.children.length) addGlossaryRow(); });
+        row.appendChild(a); row.appendChild(b); row.appendChild(del); glRows.appendChild(row);
+      }
+      function getGlossaryPairs() {
+        const pairs = [];
+        Array.from(glRows.children).forEach(row => {
+          const o = ((row.querySelector('.gl-o') || {}).value || '').trim();
+          const t = ((row.querySelector('.gl-t') || {}).value || '').trim();
+          if (o && t) pairs.push([o, t]);
+        });
+        return pairs;
+      }
+      function glossaryPayload() { return { glossary: getGlossaryPairs(), keep_honorifics: glHon.checked }; }
+      for (let i = 0; i < 5; i++) addGlossaryRow();
+      document.getElementById('btn-glossary').addEventListener('click', () => glModal.classList.remove('hidden'));
+      document.getElementById('gl-close').addEventListener('click', () => glModal.classList.add('hidden'));
+      document.getElementById('gl-done').addEventListener('click', () => glModal.classList.add('hidden'));
+      document.getElementById('gl-add').addEventListener('click', () => addGlossaryRow());
+      document.getElementById('gl-export').addEventListener('click', () => {
+        const csv = getGlossaryPairs().map(([o, t]) => `"${o.replace(/"/g, '""')}","${t.replace(/"/g, '""')}"`).join('\n');
+        const a = document.createElement('a'); a.download = 'glossary.csv';
+        a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv); a.click();
+      });
+      document.getElementById('gl-import').addEventListener('click', () => document.getElementById('gl-file').click());
+      document.getElementById('gl-file').addEventListener('change', async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        const text = await f.text();
+        glRows.innerHTML = '';
+        text.split(/\r?\n/).filter(l => l.trim()).forEach(line => {
+          let o = '', t = '';
+          const m = line.match(/^\s*"((?:[^"]|"")*)"\s*,\s*"((?:[^"]|"")*)"\s*$/);
+          if (m) { o = m[1].replace(/""/g, '"'); t = m[2].replace(/""/g, '"'); }
+          else { const idx = line.indexOf(','); if (idx >= 0) { o = line.slice(0, idx).trim(); t = line.slice(idx + 1).trim(); } }
+          if (o || t) addGlossaryRow(o, t);
+        });
+        if (!glRows.children.length) for (let i = 0; i < 5; i++) addGlossaryRow();
+        e.target.value = '';
+      });
+
+      // ---------- Proxy / LLM connection (temporary, per browser tab) ----------
+      let proxyCfg = { base_url: '', api_key: '', model: '' };
+      try { const s = sessionStorage.getItem('echoes-proxy'); if (s) proxyCfg = Object.assign(proxyCfg, JSON.parse(s)); } catch (e) {}
+      const pxModal = document.getElementById('proxy-modal');
+      const pxBase = document.getElementById('px-base'), pxKey = document.getElementById('px-key'),
+            pxModel = document.getElementById('px-model'), pxStatus = document.getElementById('px-status');
+      function proxyReady() { return !!(proxyCfg.api_key && proxyCfg.model); }
+      document.getElementById('btn-proxy').addEventListener('click', () => {
+        pxBase.value = proxyCfg.base_url || ''; pxKey.value = proxyCfg.api_key || ''; pxModel.value = proxyCfg.model || '';
+        pxStatus.textContent = ''; pxModal.classList.remove('hidden');
+      });
+      document.getElementById('px-close').addEventListener('click', () => pxModal.classList.add('hidden'));
+      document.getElementById('px-preset').addEventListener('change', (e) => {
+        if (e.target.value) pxBase.value = e.target.value;
+        e.target.value = '';
+      });
+      document.getElementById('px-save').addEventListener('click', () => {
+        proxyCfg = { base_url: pxBase.value.trim(), api_key: pxKey.value.trim(), model: pxModel.value.trim() };
+        try { sessionStorage.setItem('echoes-proxy', JSON.stringify(proxyCfg)); } catch (e) {}
+        pxStatus.textContent = 'Saved'; setTimeout(() => pxModal.classList.add('hidden'), 300);
+      });
+      document.getElementById('px-clear').addEventListener('click', () => {
+        proxyCfg = { base_url: '', api_key: '', model: '' };
+        try { sessionStorage.removeItem('echoes-proxy'); } catch (e) {}
+        pxBase.value = ''; pxKey.value = ''; pxModel.value = '';
+        pxStatus.textContent = 'Cleared';
+      });
 
       setTool('select'); updateZoomLabel(1); renderPageList();
     })();
