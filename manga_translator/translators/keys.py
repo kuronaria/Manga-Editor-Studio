@@ -47,3 +47,10 @@ CUSTOM_OPENAI_API_KEY = os.getenv('CUSTOM_OPENAI_API_KEY', 'ollama') # Unsed for
 CUSTOM_OPENAI_API_BASE = os.getenv('CUSTOM_OPENAI_API_BASE', 'http://localhost:11434/v1') # Use OLLAMA_HOST env to change binding IP and Port.
 CUSTOM_OPENAI_MODEL = os.getenv('CUSTOM_OPENAI_MODEL', '') # e.g "qwen2.5:7b". Make sure to pull and run it before use.
 CUSTOM_OPENAI_MODEL_CONF = os.getenv('CUSTOM_OPENAI_MODEL_CONF', '') # e.g "qwen2".
+
+# atlascloud (OpenAI-compatible gateway) — upstream added the translator but not
+# these keys; defined here so `from .keys import ATLASCLOUD_*` resolves and the
+# server can start. Only needed if you actually use the atlascloud translator.
+ATLASCLOUD_API_KEY = os.getenv('ATLASCLOUD_API_KEY', '')
+ATLASCLOUD_API_BASE = os.getenv('ATLASCLOUD_API_BASE', 'https://api.atlascloud.ai/v1')
+ATLASCLOUD_MODEL = os.getenv('ATLASCLOUD_MODEL', '')
